@@ -1,0 +1,353 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@300;400;700&display=swap');
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #87CEEB; /* Sky blue */
+    font-family: 'Roboto', sans-serif;
+}
+
+#canvas-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+/* UI Overlay Layer */
+#ui-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    pointer-events: none; /* Let clicks pass through by default */
+}
+
+/* Individual UI elements must enable pointer events */
+#top-bar, #status-panel, #chat-panel, #inventories, #victory-overlay, #chat-filters, .filter-btn, #reset-btn, #time-display, #tick-interval-selector, #controls-panel {
+    pointer-events: auto;
+}
+
+h1 {
+    font-family: 'Press Start 2P', cursive;
+    color: white;
+    text-shadow: 2px 2px 0 #000;
+    margin: 20px;
+    font-size: 24px;
+}
+
+#time-display {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    border: 2px solid #555;
+}
+
+#status-panel {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    width: 350px;
+    border: 2px solid #555;
+    backdrop-filter: blur(4px);
+}
+
+#ws-status {
+    font-weight: bold;
+}
+.connected { color: #4CAF50; }
+.disconnected { color: #F44336; }
+
+#agent-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 10px;
+}
+
+.agent-stat {
+    margin-bottom: 8px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Speech bubbles that will float over the 3D scene */
+#bubbles-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.speech-bubble {
+    position: absolute;
+    background: white;
+    color: black;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: bold;
+    max-width: 250px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    transform: translate(-50%, -100%);
+    opacity: 0;
+    transition: opacity 0.3s, top 0.1s, left 0.1s;
+    text-align: center;
+}
+
+/* Bubble triangle pointing down */
+.speech-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    margin-left: -10px;
+    border-width: 10px 10px 0;
+    border-style: solid;
+    border-color: white transparent transparent transparent;
+}
+
+/* Identificadores com o Nome dos Agentes */
+.name-label {
+    position: absolute;
+    color: white;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    transform: translate(-50%, -50%); /* Centraliza exato no XY projetado */
+    pointer-events: none;
+    text-shadow: 1px 1px 0px #000;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Chat e Histórico */
+#chat-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.85);
+    color: white;
+    padding: 20px;
+    width: 400px;
+    border-left: 2px solid #555;
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto; /* Ensure chat highlights and allows clicks */
+}
+
+#chat-panel h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+#chat-messages {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    flex-grow: 1;
+    font-size: 13px;
+}
+
+.chat-msg {
+    margin-bottom: 8px;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    line-height: 1.4;
+}
+.chat-msg span.name {
+    font-weight: bold;
+    color: #ffeb3b;
+}
+
+/* Inventory Styles */
+#inventories {
+    position: absolute;
+    top: 75px; /* Logo abaixo do título BBBia */
+    left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Menor espaçamento */
+    pointer-events: none;
+}
+
+.agent-inventory {
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #555;
+    width: 140px; /* Mais estreita */
+    backdrop-filter: blur(4px);
+}
+
+.agent-inventory h4 {
+    margin: 0 0 5px 0;
+    font-size: 11px; /* Título menor */
+    text-transform: uppercase;
+    color: #ffeb3b;
+}
+
+.inv-slots {
+    display: flex;
+    gap: 10px;
+}
+
+.inv-slot {
+    width: 32px; /* Slots menores */
+    height: 32px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #444;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+}
+.inv-slot.filled {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: #ffeb3b;
+}
+/* Volume Control */
+#volume-control {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: white;
+    pointer-events: auto; /* Allow clicking slider */
+}
+#volume-slider {
+    flex: 1;
+    cursor: pointer;
+    accent-color: #ffeb3b;
+}
+
+/* Chat Filters */
+#chat-filters {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+.filter-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid #555;
+    padding: 5px 10px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.filter-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.filter-btn.active {
+    background: #ffeb3b;
+    color: black;
+    border-color: #ffeb3b;
+    font-weight: bold;
+}
+
+/* Victory Overlay */
+#victory-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+}
+#victory-overlay.hidden { display: none; }
+
+.victory-content {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    padding: 60px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 0 50px rgba(255, 215, 0, 0.5);
+    color: black;
+    animation: victoryPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes victoryPop {
+    from { transform: scale(0.5); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.victory-content h1 {
+    font-size: 40px;
+    margin: 0;
+    color: #333;
+    text-shadow: none;
+}
+.victory-content h2 {
+    font-family: 'Press Start 2P', cursive;
+    margin: 30px 0;
+    font-size: 32px;
+}
+.winner-stats {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    display: flex;
+    justify-content: space-around;
+    font-weight: bold;
+}
+#reset-btn {
+    background: #333;
+    color: white;
+    border: none;
+    padding: 15px 40px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+    pointer-events: auto;
+}
+#reset-btn:hover { transform: scale(1.05); background: #000; }
+
+.control-btn:hover {
+    background: #555 !important;
+    border-color: #fff !important;
+    transform: scale(1.02);
+}
