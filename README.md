@@ -2,14 +2,22 @@
 
 Bem-vindo ao **BBBia**, uma simulação de sobrevivência 3D onde agentes controlados por Inteligência Artificial (Gemini) competem e socializam em uma ilha deserta.
 
-![Preview do Jogo](https://via.placeholder.com/800x450?text=BBBia+A+Ilha+da+iA)
+![Preview do Jogo](./assets/hero.png)
+
+### 📸 Gameplay em Tempo Real
+![Simulação da Ilha](./assets/ilhadaia.png)
 
 ## 🚀 Como Funciona?
 
-Os personagens no jogo não seguem scripts fixos. Cada um possui uma personalidade e objetivos, tomando decisões em tempo real usando o modelo `gemini-3.1-flash-lite-preview`. Eles precisam:
+Os personagens no jogo não seguem scripts fixos. Cada um possui uma personalidade e objetivos, tomando decisões em tempo real usando o modelo Gemini. Eles precisam:
+
 - **Sobreviver**: Coletar frutas e água para não morrer de fome ou sede.
 - **Socializar**: Conversar para manter o nível de amizade alto.
-- **Estratégia**: Decidir entre coletar recursos ou investir no relacionamento social.
+- **Ciclo Dia/Noite**: 
+  - **Frio Mortal**: Durante a noite, quem estiver fora de casa perde 1 HP/segundo. Os NPCs precisam correr para seus lares!
+  - **Maldição Zumbi**: Se um NPC morrer e não for enterrado, ele pode se levantar à noite como um **Zumbi**.
+  - **Desintegração Solar**: Zumbis que ficarem expostos ao sol durante o dia viram pó.
+  - **Cura Milagrosa**: Se um zumbi sobreviver escondido dentro de uma casa por 24h, ele volta a ser humano!
 
 ## 🛠️ Tecnologias Utilizadas
 
@@ -27,20 +35,16 @@ Os personagens no jogo não seguem scripts fixos. Cada um possui uma personalida
 
 1. **Clone o repositório:**
    ```bash
-   git clone https://github.com/seu-usuario/bbbia-a-ilha-da-ia.git
-   cd bbbia-a-ilha-da-ia
+   git clone https://github.com/inteligenciamilgrau/ilhadaia.git
+   cd ilhadaia
    ```
 
 2. **Configure o Backend:**
    - Entre na pasta `backend`.
    - Crie um ambiente virtual: `python -m venv venv`.
-   - Ative o ambiente: 
-     - Windows: `venv\Scripts\activate`
-     - Linux/Mac: `source venv/bin/activate`
+   - Ative o ambiente (`venv\Scripts\activate` no Windows).
    - Instale as dependências: `pip install -r requirements.txt`.
-   - Configure sua chave de API:
-     - Copie o arquivo `.env.example` para `.env`.
-     - Insira sua `GEMINI_API_KEY` no arquivo `.env`.
+   - Configure sua chave de API no arquivo `.env`.
 
 3. **Inicie o Servidor:**
    ```bash
@@ -48,13 +52,7 @@ Os personagens no jogo não seguem scripts fixos. Cada um possui uma personalida
    ```
 
 4. **Abra o Jogo:**
-   - Basta abrir o arquivo `frontend/index.html` em qualquer navegador moderno.
-
-## 🎮 Comandos da Interface
-
-- **Volume**: Controle a música e efeitos sonoros.
-- **Velocidade IA**: Ajuste o intervalo de decisão dos agentes (de 1s a 5s).
-- **Hall da Fama**: Acompanhe o ranking de vitórias entre os personagens.
+   - Abra o arquivo `frontend/index.html` no seu navegador.
 
 ## ⚖️ Licença
 
