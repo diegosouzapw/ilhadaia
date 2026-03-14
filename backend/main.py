@@ -1,25 +1,38 @@
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 import json
 import logging
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from world import World
 from agent import Agent
+
+# Authorization
+load_dotenv()
+AUTHORIZED_IDS = [id.strip() for id in os.getenv("AUTHORIZED_IDS", "777").split(",") if id.strip()]
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
+class JoinRequest(BaseModel):
+    agent_id: str = Field(..., example="777")
+    name: str = Field(..., example="Visitante")
+    personality: str = Field(..., example="Curioso e amigável")
+
+class ActionRequest(BaseModel):
+    thought: str = ""
+    action: str = "wait"
+    speak: str = ""
+    target_name: str = ""
+    params: dict = {}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("BBB_IA")
 
-# Load environment variables
-load_dotenv()
-
-# Configuration
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123") # Default for dev
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Configuration (Already loaded at the top)
 
 app = FastAPI(title="BBB de IA - Backend Engine")
 
@@ -128,3 +141,102 @@ async def set_ai_interval(interval: int):
     world._save_history() # Persist change
     logger.info(f"AI decision interval updated to: {world.ai_interval}")
     return {"status": "Interval updated", "new_interval": world.ai_interval}
+
+# --- Remote Agent API ---
+
+@app.post("/join")
+async def join_island(req: JoinRequest):
+    # 1. Validar se o ID está na lista de autorizados
+    if req.agent_id not in AUTHORIZED_IDS:
+        logger.warning(f"Tentativa de entrada com ID não autorizado: {req.agent_id}")
+        raise HTTPException(status_code=401, detail="ID de Acesso não autorizado.")
+
+    # 2. Verificar se o ID já está em uso na ilha
+    if any(a.id == req.agent_id for a in world.agents):
+        raise HTTPException(status_code=400, detail="Este ID já está em uso na ilha.")
+
+    # Create a new remote agent
+    new_agent = Agent(req.name, req.personality, 10, 10, is_remote=True, agent_id=req.agent_id)
+    world.add_agent(new_agent)
+    logger.info(f"Remote agent joined: {new_agent.name} (ID: {new_agent.id})")
+    
+    # Broadcast join event
+    await manager.broadcast({
+        "type": "update", 
+        "data": world.get_state(), 
+        "events": [{"action": "join", "event_msg": f"{new_agent.name} CHEGOU NA ILHA!", "agent_id": new_agent.id, "name": new_agent.name}]
+    })
+    
+    return {
+        "status": "Joined successfully",
+        "agent_id": new_agent.id,
+        "name": new_agent.name,
+        "personality": new_agent.personality,
+        "coords": [new_agent.x, new_agent.y]
+    }
+
+@app.get("/agent/{agent_id}/context")
+async def get_agent_context(agent_id: str):
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    context = world._get_context_for_agent(agent)
+    # Add status info to context for the remote agent
+    context["status"] = {
+        "hp": agent.hp,
+        "hunger": agent.hunger,
+        "thirst": agent.thirst,
+        "is_alive": agent.is_alive,
+        "is_zombie": getattr(agent, "is_zombie", False),
+        "inventory": agent.inventory,
+        "pos": [agent.x, agent.y]
+    }
+    return context
+
+@app.post("/agent/{agent_id}/action")
+async def agent_action(agent_id: str, req: ActionRequest):
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    if not agent.is_alive:
+        return {"status": "Agent is dead", "action": "ignored"}
+
+    # Construct the internal action format
+    action_data = {
+        "agent_id": agent.id,
+        "name": agent.name,
+        "thought": req.thought,
+        "action": req.action,
+        "speak": req.speak,
+        "target_name": req.target_name
+    }
+    # Merge params (dx, dy, target_x, target_y)
+    for k, v in req.params.items():
+        action_data[k] = v
+        
+    # Apply action to the world
+    world._apply_action(agent, action_data)
+    
+    # Send event to world events list so frontends see it
+    world.ai_events.append(action_data)
+    
+    if req.speak:
+        logger.info(f"[REMOTE CHAT] {agent.name}: {req.speak}")
+        
+    return {"status": "Action processed", "action": req.action}
+
+@app.delete("/agent/{agent_id}")
+async def delete_agent(agent_id: str):
+    success = world.remove_agent(agent_id)
+    if success:
+        # Broadcast removal to frontends
+        await manager.broadcast({
+            "type": "update", 
+            "data": world.get_state(),
+            "events": [{"action": "busy", "event_msg": f"AGENTE {agent_id} FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
+        })
+        return {"status": "Agent removed", "agent_id": agent_id}
+    else:
+        raise HTTPException(status_code=404, detail="Agent not found")

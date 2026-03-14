@@ -16,8 +16,9 @@ def get_current_key():
     return os.getenv("GEMINI_API_KEY")
 
 class Agent:
-    def __init__(self, name: str, personality: str, start_x: int, start_y: int):
-        self.id = str(uuid4())
+    def __init__(self, name: str, personality: str, start_x: int, start_y: int, is_remote: bool = False, agent_id: str = None):
+        self.id = agent_id if agent_id else str(uuid4())
+        self.is_remote = is_remote
         self.name = name
         self.personality = personality
         self.x = start_x
@@ -106,7 +107,7 @@ class Agent:
         
     async def act(self, context: dict):
         """Called every tick by the World to get the agent's next action."""
-        if not self.is_alive:
+        if not self.is_alive or self.is_remote:
             return None
 
         current_key = get_current_key()

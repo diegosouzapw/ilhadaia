@@ -138,6 +138,16 @@ class World:
         self.pending_spawns.append((spawn_tick, agent))
         logger.info(f"Scheduled spawn for {agent.name} at tick {spawn_tick}")
 
+    def remove_agent(self, agent_id: str):
+        agent = next((a for a in self.agents if a.id == agent_id), None)
+        if agent:
+            self.agents.remove(agent)
+            if agent.id in self.entities:
+                del self.entities[agent.id]
+            logger.info(f"Agent {agent.name} (ID: {agent_id}) removed from world.")
+            return True
+        return False
+
     async def tick(self):
         """Advances the world simulation by one unit of time."""
         # 0. Check for auto-reset if game is over (2 min = 120 ticks at 1s/tick)
@@ -395,7 +405,7 @@ class World:
                     # Skip agents that are still walking or just arrived (1s wait)
                     is_walking = getattr(agent, 'target_x', None) is not None
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
-                    if agent.is_alive and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
+                    if agent.is_alive and not getattr(agent, 'is_remote', False) and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
                         context = self._get_context_for_agent(agent)
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
         else:
@@ -407,10 +417,10 @@ class World:
                     agent_index = alive_indices[idx_in_alive]
                     agent = self.agents[agent_index]
                     
-                    # Only trigger if not already thinking AND not walking AND not just arrived
+                    # Only trigger if not remote AND not already thinking AND not walking AND not just arrived
                     is_walking = getattr(agent, 'target_x', None) is not None
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
-                    if agent.id not in self.thinking_agents and not is_walking and not just_arrived:
+                    if not getattr(agent, 'is_remote', False) and agent.id not in self.thinking_agents and not is_walking and not just_arrived:
                         context = self._get_context_for_agent(agent)
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
                 
