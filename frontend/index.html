@@ -101,6 +101,66 @@
         </div>
     </div>
 
+    <!-- ═══ T16: HUD de Benchmark ═══════════════════════════════════════ -->
+    <div id="benchmark-hud">
+        <h3>🏆 Benchmark ao Vivo</h3>
+        <table id="benchmark-table">
+            <thead>
+                <tr>
+                    <th>Agente</th>
+                    <th>Modelo</th>
+                    <th>Tokens</th>
+                    <th>Score</th>
+                    <th>HP</th>
+                </tr>
+            </thead>
+            <tbody id="benchmark-body">
+                <tr><td colspan="5" style="text-align:center;color:#666">Aguardando dados...</td></tr>
+            </tbody>
+        </table>
+        <div id="benchmark-session" style="margin-top:8px; font-size:10px; color:#666; border-top:1px solid #333; padding-top:4px;">
+            Session: <span id="session-id-display">-</span>
+        </div>
+    </div>
+
+    <!-- ═══ T13/T16: Painel de Replay ════════════════════════════════════ -->
+    <div id="replay-panel">
+        <h3>▶ Replay de Sessões</h3>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+            <select id="session-select" style="flex:1; background:#222; color:#e0e0e0; border:1px solid #444; border-radius:4px; padding:4px;"></select>
+            <button class="replay-btn" onclick="loadReplay()">Carregar</button>
+        </div>
+        <div id="replay-controls" style="display:none;">
+            <input type="range" id="replay-slider" min="0" max="0" value="0"
+                   oninput="seekReplay(this.value)" style="width:100%; margin:6px 0;">
+            <div style="display:flex; gap:6px; align-items:center; font-size:12px;">
+                <span id="replay-tick-label" style="color:#4fc3f7; font-family:monospace;">Tick: 0</span>
+                <button class="replay-btn" id="play-btn" onclick="startReplay()">▶ Play</button>
+                <button class="replay-btn" onclick="pauseReplay()">⏸</button>
+                <button class="replay-btn" onclick="stopReplay()">⏹</button>
+                <span style="margin-left:auto; color:#aaa;"><span id="replay-frame-count">0</span> frames</span>
+            </div>
+        </div>
+        <p id="replay-status" style="font-size:11px; color:#888; margin:4px 0;">Selecione uma sessão para replay.</p>
+    </div>
+
+    <!-- ═══ T16: Modal de detalhe do agente ═════════════════════════════ -->
+    <div id="agent-modal" class="hidden">
+        <div id="agent-modal-content">
+            <button id="modal-close-btn" onclick="closeAgentModal()">✕</button>
+            <h2 id="modal-agent-name">Agente</h2>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ═══ T16: Timeline de eventos ════════════════════════════════════ -->
+    <div id="event-timeline">
+        <h3>📜 Eventos</h3>
+        <ul id="event-list"></ul>
+    </div>
+
+    <!-- Scripts de extensão para benchmark e replay -->
+    <script src="benchmark.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

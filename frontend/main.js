@@ -67,16 +67,13 @@ document.getElementById('volume-slider').value = globalVolume;
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 // --- Configuração de URLs Dinâmicas ---
-// Se estiver rodando localmente (localhost, 127.0.0.1 ou via arquivo direto), aponta para o localhost:8000
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '';
+// Detecta ambiente: arquivo local usa 8001, produção usa o host atual
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '' || window.location.protocol === 'file:';
+const BACKEND_PORT = isLocal ? '8001' : (window.location.port || '');
+const BACKEND_HOST = isLocal ? 'localhost' : window.location.hostname;
 
-const API_BASE_URL = isLocal 
-    ? 'http://localhost:8000' 
-    : `${window.location.protocol}//${window.location.host}/api`;
-
-const WS_URL = isLocal
-    ? 'ws://localhost:8000/ws'
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+const API_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+const WS_URL = `ws://${BACKEND_HOST}:${BACKEND_PORT}/ws`;
 
 // Tenta carregar o Admin Token do localStorage ou pede ao usuário se for necessário
 let adminToken = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
@@ -519,6 +516,15 @@ function connectWebSocket() {
             
             if (message.events) {
                 handleEvents(message.events);
+                // T16: Timeline de eventos
+                if (typeof addEventToTimeline === 'function') {
+                    addEventToTimeline(message.events, message.data?.ticks);
+                }
+            }
+
+            // T16: HUD de Benchmark — atualiza com agentes do estado
+            if (typeof updateBenchmarkHUD === 'function' && message.data?.agents) {
+                updateBenchmarkHUD(message.data.agents, message.data?.session_id);
             }
         }
     };

@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data        # SQLite persistente
+      - ./backend/logs:/app/logs        # NDJSON decision logs
+      - ./backend/data/replays:/app/data/replays  # Replay files
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-dev_token_123}
+      - OMNIROUTER_URL=${OMNIROUTER_URL:-http://192.168.0.15:20128}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+    restart: unless-stopped

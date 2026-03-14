@@ -45,8 +45,28 @@ class Agent:
         self.death_tick = None  # Tick when this agent died
 
         
-        # Simple memory (could be a vector DB later)
-        self.memory = []
+        # ── Budget & Cooldown (T02) ─────────────────────────────────────────
+        self.token_budget: int = 10_000     # limite de tokens por sessão
+        self.tokens_used: int = 0           # tokens consumidos na sessão
+        self.cooldown_ticks: int = 3        # ticks mínimos entre pensamentos
+        self.last_thought_tick: int = -99   # último tick que chamou a IA
+        self.profile_id: str = "gemini-native"  # perfil de IA usado
+        self.owner_id: str = ""             # owner externo (se houver)
+
+        # ── Benchmark Tracking ───────────────────────────────────────────────
+        self.benchmark: dict = {
+            "ticks_survived": 0,
+            "decisions_made": 0,
+            "invalid_actions": 0,
+            "score": 0.0,
+            "cost_usd": 0.0,
+        }
+
+        # ── Memória 4 Camadas (T10) ──────────────────────────────────────────
+        from runtime.memory import AgentMemory
+        self.agent_memory = AgentMemory()
+        # Compatibilidade retroativa: self.memory ainda aponta para short_term entries
+        self.memory: list = self.agent_memory.short_term  # type: ignore
         
         # Determine home coordinates
         home_coords = "(2, 2)" # Default fallback
@@ -105,6 +125,24 @@ class Agent:
             self.client = None
 
         
+    def can_think(self, current_tick: int) -> bool:
+        """Verifica se o agente pode chamar a IA agora (respeita cooldown e budget)."""
+        if current_tick - self.last_thought_tick < self.cooldown_ticks:
+            return False  # cooldown não passou
+        if self.tokens_used >= self.token_budget:
+            return False  # budget esgotado
+        return True
+
+    def update_benchmark(self, ticks_alive: int = 0, score_delta: float = 0.0,
+                         tokens_delta: int = 0, invalid: bool = False) -> None:
+        """Atualiza métricas de benchmark do agente."""
+        self.benchmark["ticks_survived"] = max(self.benchmark["ticks_survived"], ticks_alive)
+        self.benchmark["score"] += score_delta
+        self.tokens_used += tokens_delta
+        self.benchmark["decisions_made"] += 1
+        if invalid:
+            self.benchmark["invalid_actions"] += 1
+
     async def act(self, context: dict):
         """Called every tick by the World to get the agent's next action."""
         if not self.is_alive or self.is_remote:
