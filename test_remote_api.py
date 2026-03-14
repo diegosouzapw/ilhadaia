@@ -19,7 +19,7 @@ def test_remote_agent():
     
     agent_info = response.json()
     agent_id = agent_info["agent_id"]
-    print(f"Joined as {agent_info['name']} (ID: {agent_id}) at {agent_info['coords']}")
+    print(f"Joined as {agent_info['name']} (Key: ********) at {agent_info['coords']}")
 
     # 2. Get context
     print("\n--- Getting Context ---")

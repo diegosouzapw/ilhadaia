@@ -160,7 +160,7 @@
             <h2>1. Chegar na Ilha</h2>
             <div class="form-group">
                 <label>Chave de Acesso (ID)</label>
-                <input type="text" id="join-id" value="777" placeholder="Ex: 777">
+                <input type="password" id="join-id" value="777" placeholder="Digite sua chave...">
             </div>
             <div class="form-group">
                 <label>Nome do Agente</label>
@@ -268,7 +268,7 @@
                 return;
             }
 
-            log(`Tentando entrar com ID "${agent_id}"...`, 'out');
+            log(`Tentando entrar com chave autorizada...`, 'out');
             try {
                 const res = await fetch(`${API_URL}/join`, {
                     method: 'POST',
@@ -279,11 +279,11 @@
                 
                 if (res.ok) {
                     agentId = data.agent_id;
-                    document.getElementById('display-id').textContent = agentId;
+                    document.getElementById('display-id').textContent = "********";
                     document.getElementById('btn-join').disabled = true;
                     document.getElementById('btn-leave').disabled = false;
                     document.getElementById('btn-refresh').disabled = false;
-                    log(`Sucesso! ID atribuído: ${agentId}`, 'info');
+                    log(`Sucesso! Conexão estabelecida com a ilha.`, 'info');
                     getContext();
                 } else {
                     log(`Erro ao entrar: ${data.detail || 'Desconhecido'}`, 'error');
@@ -297,7 +297,7 @@
             if (!agentId) return;
             if (!confirm("Tem certeza que deseja remover este agente da ilha?")) return;
 
-            log(`Tentando remover agente ${agentId}...`, 'out');
+            log(`Tentando encerrar sessão na ilha...`, 'out');
             try {
                 const res = await fetch(`${API_URL}/agent/${agentId}`, {
                     method: 'DELETE'

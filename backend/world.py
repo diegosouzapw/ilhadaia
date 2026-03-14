@@ -142,9 +142,8 @@ class World:
         agent = next((a for a in self.agents if a.id == agent_id), None)
         if agent:
             self.agents.remove(agent)
-            if agent.id in self.entities:
-                del self.entities[agent.id]
-            logger.info(f"Agent {agent.name} (ID: {agent_id}) removed from world.")
+            self.entities.pop(agent.id, None)
+            logger.info(f"Agent {agent.name} removed from world.")
             return True
         return False
 

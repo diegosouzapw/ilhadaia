@@ -148,7 +148,7 @@ async def set_ai_interval(interval: int):
 async def join_island(req: JoinRequest):
     # 1. Validar se o ID está na lista de autorizados
     if req.agent_id not in AUTHORIZED_IDS:
-        logger.warning(f"Tentativa de entrada com ID não autorizado: {req.agent_id}")
+        logger.warning(f"Tentativa de entrada com ID não autorizado.")
         raise HTTPException(status_code=401, detail="ID de Acesso não autorizado.")
 
     # 2. Verificar se o ID já está em uso na ilha
@@ -158,7 +158,7 @@ async def join_island(req: JoinRequest):
     # Create a new remote agent
     new_agent = Agent(req.name, req.personality, 10, 10, is_remote=True, agent_id=req.agent_id)
     world.add_agent(new_agent)
-    logger.info(f"Remote agent joined: {new_agent.name} (ID: {new_agent.id})")
+    logger.info(f"Remote agent joined: {new_agent.name}")
     
     # Broadcast join event
     await manager.broadcast({
@@ -235,7 +235,7 @@ async def delete_agent(agent_id: str):
         await manager.broadcast({
             "type": "update", 
             "data": world.get_state(),
-            "events": [{"action": "busy", "event_msg": f"AGENTE {agent_id} FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
+            "events": [{"action": "busy", "event_msg": f"UM AGENTE FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
         })
         return {"status": "Agent removed", "agent_id": agent_id}
     else:
