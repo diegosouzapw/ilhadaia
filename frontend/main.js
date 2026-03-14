@@ -536,6 +536,16 @@ function updateWorld(data) {
     // Update day/night cycle
     if (data.day_cycle !== undefined) {
         currentDayCycle = data.day_cycle;
+        
+        // Calculate 24h clock: 1 tick = 12 minutes. 
+        // 0 ticks = 04:00 AM (Sunrise cycle starts with dawn at 110-120 and 0-10)
+        let totalMinutes = (data.day_cycle * 12) + (4 * 60); 
+        let hours = Math.floor(totalMinutes / 60) % 24;
+        let minutes = totalMinutes % 60;
+        let timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const clockEl = document.getElementById("game-clock");
+        if (clockEl) clockEl.textContent = timeStr;
+
         const icon = document.getElementById("day-night-icon");
         if (icon) {
             if (data.is_night) {
@@ -850,7 +860,11 @@ function renderChat() {
             chatMessages.appendChild(li);
         }
     });
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    const autoscroll = document.getElementById('chat-autoscroll')?.checked;
+    if (autoscroll) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
 }
 
 function handleEvents(events) {
@@ -1074,25 +1088,21 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-let isFixedCamera = localStorage.getItem('bbb_camera_fixed') !== 'false'; // Default to true
+let isFixedCamera = false; // Always free camera
 
 function applyCameraMode(save = true) {
-    const btn = document.getElementById("toggle-camera");
-    if (!btn) return;
     if (isFixedCamera) {
-        btn.innerText = "🎥 Câmera: Fixa";
+        // Redundant but keeping structure
         controls.enabled = false;
         camera.position.set(WORLD_SIZE, 30, WORLD_SIZE + 10);
         controls.target.set(WORLD_SIZE, 0, WORLD_SIZE);
         camera.lookAt(WORLD_SIZE, 0, WORLD_SIZE);
     } else {
-        btn.innerText = "🎥 Câmera: Livre";
         controls.enabled = true;
     }
-    if (save) localStorage.setItem('bbb_camera_fixed', isFixedCamera);
 }
 
-// Initial setup from stored state
+// Initial setup
 applyCameraMode(false);
 
 function setCameraFixed(val) {
@@ -1100,10 +1110,8 @@ function setCameraFixed(val) {
     applyCameraMode();
 }
 
-// Global function called by the button
 window.toggleCameraMode = function() {
-    isFixedCamera = !isFixedCamera;
-    applyCameraMode();
+    // Disabled
 };
 
 animate();

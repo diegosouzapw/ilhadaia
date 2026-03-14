@@ -268,7 +268,7 @@ class World:
                     
                     dist_to_home = abs(agent.x - home_x) + abs(agent.y - home_y)
                     if dist_to_home > 2:
-                        agent.hp -= 1
+                        agent.hp -= 2
                         if self.ticks % 5 == 0:
                             events.append({"agent_id": agent.id, "action": "busy", "name": agent.name, "event_msg": "está congelando de frio lá fora! Preciso ir pra casa! 🥶"})
 
@@ -380,43 +380,7 @@ class World:
             if agent.is_alive and not getattr(agent, 'is_zombie', False):
                 self._check_auto_interactions(agent, events)
 
-        # 2.2 ZOMBIE AI: Chase nearest alive agent and attack on contact
-        for agent in self.agents:
-            if getattr(agent, 'is_zombie', False) and agent.is_alive:
-                # Find nearest alive non-zombie agent
-                nearest = None
-                nearest_dist = float('inf')
-                for other in self.agents:
-                    if other.is_alive and not getattr(other, 'is_zombie', False):
-                        d = abs(other.x - agent.x) + abs(other.y - agent.y)
-                        if d < nearest_dist:
-                            nearest_dist = d
-                            nearest = other
-                
-                if nearest:
-                    # Attack if adjacent (distance <= 1)
-                    if abs(nearest.x - agent.x) <= 1 and abs(nearest.y - agent.y) <= 1:
-                        nearest.hp -= 10
-                        events.append({"agent_id": agent.id, "action": "zombie_attack", "name": agent.name, "event_msg": f"🧟 MORDEU {nearest.name}! (-10 HP) 🩸"})
-                        if nearest.hp <= 0:
-                            nearest.hp = 0
-                            nearest.is_alive = False
-                            nearest.hunger = 0
-                            nearest.thirst = 0
-                            nearest.death_tick = self.ticks
-                            events.append({"agent_id": nearest.id, "action": "die", "name": nearest.name, "event_msg": f"FOI MORTO PELO ZUMBI {agent.name}! 💀🧟"})
-                            self._apply_action(nearest, {"action": "die"})
-                    else:
-                        # Move toward nearest alive agent (1 step)
-                        dx, dy = self._get_next_step_bfs(agent.x, agent.y, nearest.x, nearest.y)
-                        new_x = agent.x + dx
-                        new_y = agent.y + dy
-                        if self._is_walkable(new_x, new_y):
-                            agent.x = new_x
-                            agent.y = new_y
-                            if agent.id in self.entities:
-                                self.entities[agent.id]["x"] = agent.x
-                                self.entities[agent.id]["y"] = agent.y
+        # 2.2 ZOMBIE AI: Removed (Now controlled by Gemini AI)
 
         # 2.2 Collect events from background AI tasks that finished
         if self.ai_events:
@@ -431,12 +395,12 @@ class World:
                     # Skip agents that are still walking or just arrived (1s wait)
                     is_walking = getattr(agent, 'target_x', None) is not None
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
-                    if agent.is_alive and not getattr(agent, 'is_zombie', False) and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
+                    if agent.is_alive and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
                         context = self._get_context_for_agent(agent)
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
         else:
             if self.ticks % self.ai_interval == 0 and self.agents and not self.game_over:
-                alive_indices = [i for i, a in enumerate(self.agents) if a.is_alive and not getattr(a, 'is_zombie', False)]
+                alive_indices = [i for i, a in enumerate(self.agents) if a.is_alive]
                 if alive_indices:
                     turn_num = self.ticks // self.ai_interval
                     idx_in_alive = turn_num % len(alive_indices)
@@ -594,15 +558,20 @@ class World:
                      if carrying_body:
                          reachable_resources.append("ÁREA DO CEMITÉRIO! Você está carregando um corpo e está no local certo. Use a ação 'bury' agora!")
                      elif unburied_body_exists:
-                         reachable_resources.append("ÁREA DO CEMITÉRIO. Há corpos não enterrados na ilha! Mas você NÃO está carregando nenhum agora. Vá buscar o corpo primeiro com 'pickup_body'!")
+                         reachable_resources.append("ÁREA DO CEMITÉRIO. Há corpos não enterrados na ilha! Se você quiser ajudar, vá buscar o corpo primeiro com 'pickup_body' onde ele estiver caído.")
         
         # Check if agent is carrying a body
         carried_body_obj = next((a for a in self.agents if a.carried_by == agent.id), None)
         is_carrying_body = carried_body_obj is not None
         carrying_name = carried_body_obj.name if carried_body_obj else None
 
+        # Day/Night Info
+        day_pos = self.ticks % self.DAY_CYCLE
+        is_night = 80 <= day_pos < 110
+
         return {
             "time": self.ticks,
+            "is_night": is_night,
             "visible_entities": visible_entities,
             "reachable_now": reachable_resources,
             "can_gather_now": possible_to_gather,
@@ -799,6 +768,26 @@ class World:
                 action_event["event_msg"] += f" O corpo de {carried_body.name} que estava na bolsa também caiu!"
                 logger.info(f"Body of {carried_body.name} dropped at {agent.x},{agent.y} because carrier {agent.name} died.")
 
+        elif act_type == "attack":
+            # Zombie attack logic
+            target_name = action_event.get("target_name")
+            target = next((a for a in self.agents if a.name == target_name and a.is_alive), None)
+            
+            if target and abs(target.x - agent.x) <= 1 and abs(target.y - agent.y) <= 1:
+                damage = 20 # Zumbis batem forte
+                target.hp -= damage
+                action_event["event_msg"] = f"ATACOU {target.name}! (-{damage} HP) 🩸"
+                logger.warning(f"{agent.name} (Zombie) attacked {target.name}")
+                
+                if target.hp <= 0:
+                    target.hp = 0
+                    target.is_alive = False
+                    target.death_tick = self.ticks
+                    action_event["event_msg"] += f" {target.name} FOI ABATIDO PELO ZUMBI!"
+                    self._apply_action(target, {"action": "die"})
+            else:
+                action_event["event_msg"] = "tentou atacar mas errou o bote! (Ninguém por perto)"
+
         elif act_type == "pickup_body":
             # Check for dead agents nearby
             found_body = None
@@ -816,7 +805,8 @@ class World:
                     agent.inventory.append("dead_body")
                 action_event["event_msg"] = f"pegou o {found_body.name} no colo para levar ao cemitério! O corpo apareceu na bolsa."
             else:
-                action_event["event_msg"] = "TENTOU PEGAR UM CORPO mas não há ninguém morto por perto."
+                # Silêncio para evitar spam no chat global
+                logger.debug(f"{agent.name} tried to pickup_body but none nearby.")
 
         elif act_type == "bury":
             # Check if carrying a body and at cemetery area (radius 2 for tolerance)

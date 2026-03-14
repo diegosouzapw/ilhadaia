@@ -61,40 +61,32 @@ class Agent:
         Sua personalidade é: {self.personality}
         SUA CASA fica nas coordenadas: {home_coords}.
         
-        MANUAL DE SOBREVIVÊNCIA (PRIORIDADES ABSOLUTAS):
-        0. SE ESTIVER DE NOITE: Você DEVE voltar para a sua casa (usar move_to para as coordenadas {home_coords}) e ficar lá parado ("wait", "speak" ou "eat"). Se ficar fora de casa à noite, você vai congelar e perder vida muito rápido!
-        1. SE FOME < 30: Você DEVE "eat" (se tiver "fruit") ou ir colher ("gather").
-        2. SE SEDE < 30: Você DEVE ir à margem do lago (coordenada 7,10), usar "fill_bottle" para pegar água, e DEPOIS usar "drink".
-        3. BEBER ÁGUA: Requer que você tenha o item "water_bottle" na bolsa. Se não tiver, vá ao lago e "fill_bottle".
+        MANUAL DE SOBREVIVÊNCIA (SOBREVIVENTES):
+        0. NOITE: Quando escurece, o frio tira 2 HP por tick se você estiver fora de casa. Vá para sua casa ({home_coords}) para ficar seguro.
+        ⚠️ CUIDADO: Zumbis também podem buscar abrigo nas casas à noite para se curar.
+        1. MIASMA: Se houver mortos não enterrados, todos perdem HP. Enterre os corpos no Cemitério (15,5).
         
-        Ações permitidas para o campo "action":
-        - "move": requer parâmetros "dx" e "dy" (valores -1, 0, 1).
-        - "move_to": requer parâmetros "target_x" e "target_y".
-        - "gather": colher fruta madura (item "fruit" entra na bolsa).
-        - "fill_bottle": encher garrafa d'água (item "water_bottle" entra na bolsa). Requer estar perto do Lago.
-        - "eat": comer fruta da bolsa (conisome item "fruit"). Aumenta Fome.
-        - "drink": beber da garrafa (consome item "water_bottle"). Aumenta Sede.
-        - "pickup_body": carregar o corpo de um colega morto que esteja na mesma posição ou adjacente.
-        - "bury": enterrar o corpo que você está carregando. Requer estar na área do Cemitério (15,5).
-        - "wait": não faz nada.
-        - "speak": AÇÃO DE CONVERSA (BONDING). Use para aumentar a amizade drasticamente (+30).
+        🧠 MANUAL DO ZUMBI (APENAS SE VOCÊ FOR ZUMBI):
+        1. SEU OBJETIVO: Você é um morto-vivo! Seu instinto é perseguir e ATACAR humanos vivos.
+        2. AÇÃO DE ATAQUE: Use "attack" quando estiver adjacente a um humano.
+        3. CURA (PRIORIDADE): Se você sobreviver dentro de uma casa durante o dia, você se CURA e volta a ser humano.
+        4. ESTRATÉGIA DE SOBREVIVÊNCIA: Vá para sua casa ({home_coords}) IMEDIATAMENTE durante a NOITE. Se o sol nascer e você estiver fora de casa, você MORRERÁ QUEIMADO INSTANTANEAMENTE.
+        5. LUZ DO SOL: O sol é mortal para zumbis. Fique escondido em casa.
         
-        RELACIONAMENTO E ESCOLHA (ESTRATÉGIA):
-        A amizade cai a cada segundo (-1).
-        Para recuperá-la rápido, use a AÇÃO "speak" (ganha +40). 
-        Se falar enquanto faz outra ação (como "move" ou "eat"), ganha um bônus menor (+5).
+        Ações permitidas:
+        - "move": requer "dx", "dy" (-1, 0, 1).
+        - "move_to": requer "target_x", "target_y".
+        - "attack": Ataca um humano próximo (Apenas para Zumbis).
+        - "speak": Fala/Rosna algo.
+        - "wait": Não faz nada.
+        - "eat" / "drink" / "gather" / "fill_bottle": Ações de sobrevivência (Humans only).
+        - "pickup_body" / "bury": Ações de luto (Humans only).
         
-        ⚠️ REGRA DE URGÊNCIA (LUTO):
-        Se algum colega morrer e NÃO for enterrado no cemitério (15,5), o "Miasma da Morte" fará TODOS os sobreviventes perderem 1 HP a cada segundo! 
-        Vocês devem decidir quem vai levar o corpo e enterrar o mais rápido possível para salvar o grupo.
-        
-        Você deve SEMPRE tentar se comunicar preenchendo o "speak".
-        
-        Formato obrigatório do JSON:
+        JSON:
         {{
-            "thought": "Pensamento interno sobre o que fazer agora",
-            "speak": "Frase dita em voz alta",
-            "target_name": "Nome do Alvo (se estiver falando com alguém específico, caso contrário deixe vazio)",
+            "thought": "Pensamento",
+            "speak": "Frase ou Rosnado",
+            "target_name": "Nome do Alvo",
             "action": "nome_da_acao",
             "params": {{ "dx": 0, "dy": 0, "target_x": 0, "target_y": 1 }}
         }}
@@ -133,9 +125,11 @@ class Agent:
         # Build prompt based on context
         prompt = f"""
         TICK ATUAL: {context['time']}
+        PERÍODO: {"🌙 NOITE" if context.get('is_night') else "☀️ DIA"}
         SEU STATUS:
         Posição: x={self.x}, y={self.y}
-        Fome: {self.hunger}/100 (0=Morte, 100=Satisfeito)
+        ZUMBI: {"SIM! (Você deve atacar para sobreviver ou buscar cura)" if self.is_zombie else "NÃO (Você é humano)"}
+        Fome: {self.hunger}/100
         Sede: {self.thirst}/100 (0=Morte, 100=Satisfeito)
         HP: {self.hp}/100
         Amizade: {self.friendship}/100
@@ -145,8 +139,8 @@ class Agent:
         VOCÊ PODE INTERAGIR COM (ALCANCE IMEDIATO):
         {json.dumps(context.get('reachable_now', []), indent=2)}
         
-        {f'⚠️ ALERTA DE SEDE CRÍTICA: Você tem uma "water_bottle" na bolsa! Use a ação "drink" IMEDIATAMENTE!' if 'water_bottle' in context['inventory'] and self.thirst < 30 else ''}
-        {f'⚠️ ALERTA DE FOME CRÍTICA: Você tem "fruit" na bolsa! Use a ação "eat" IMEDIATAMENTE!' if 'fruit' in context['inventory'] and self.hunger < 30 else ''}
+        {f'⚠️ ALERTA DE SEDE: Você tem "water_bottle" na bolsa! Use "drink" se estiver com sede.' if 'water_bottle' in context['inventory'] and self.thirst < 40 else ''}
+        {f'⚠️ ALERTA DE FOME: Você tem "fruit" na bolsa! Use "eat" se estiver com fome.' if 'fruit' in context['inventory'] and self.hunger < 40 else ''}
         
         {f'🚀 AVISO: Você está caminhando automaticamente rumo a {context["is_moving_automatically_to"]}.' if context['is_moving_automatically_to'] else ''}
         

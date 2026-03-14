@@ -13,27 +13,29 @@
     <div id="ui-layer">
         <h1>👁️ BBBia: A Ilha da iA</h1>
         <div id="time-display">
-            <div style="margin-bottom: 5px;">
-                Dificuldade: Sobrevivência | Tick: <span id="tick-counter">0</span> | <span id="day-night-icon" style="font-weight: bold;">☀️ Dia</span> | 
-                Jogadores:
-                <select id="player-count-selector" style="background: #333; color: #ffeb3b; border: 1px solid #555; border-radius: 4px; padding: 2px 5px; cursor: pointer; font-weight: bold;">
-                    <option value="2">2 (João & Maria)</option>
-                    <option value="3">3 (+ Zeca)</option>
-                    <option value="4" selected>4 (+ Elly)</option>
-                </select> |
-                Intervalo: 
-                <select id="tick-interval-selector" onchange="updateTickInterval(this.value)" style="background: #333; color: #ffeb3b; border: 1px solid #555; border-radius: 4px; padding: 2px 5px; cursor: pointer; font-weight: bold;">
+            <div class="time-line">
+                Dificuldade: Sobrevivência | Tick: <span id="tick-counter">0</span> | 
+                <label style="cursor: pointer; background: #333; padding: 2px 5px; border-radius: 4px; border: 1px solid #555; font-size: 12px; vertical-align: middle;">
+                    <input type="checkbox" id="fast-mode-checkbox" onchange="toggleFastMode(this.checked)"> Sem Intervalo
+                </label>
+                | <span id="day-night-icon" style="font-weight: bold;">☀️ Dia</span>
+            </div>
+            <div class="time-line" style="margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px; display: flex; align-items: center; gap: 8px; justify-content: center; font-size: 13px;">
+                👥 <select id="player-count-selector" style="background: #333; color: #ffeb3b; border: 1px solid #555; border-radius: 4px; padding: 1px 3px; cursor: pointer; font-weight: bold; font-size: 12px;">
+                    <option value="2">2 Players</option>
+                    <option value="3">3 Players</option>
+                    <option value="4" selected>4 Players</option>
+                </select>
+                | ⏱️ <select id="tick-interval-selector" onchange="updateTickInterval(this.value)" style="background: #333; color: #ffeb3b; border: 1px solid #555; border-radius: 4px; padding: 1px 3px; cursor: pointer; font-weight: bold; font-size: 12px;">
                     <option value="1">1s</option>
                     <option value="2">2s</option>
                     <option value="3">3s</option>
                     <option value="4">4s</option>
                     <option value="5" selected>5s</option>
                 </select>
-                <label style="cursor: pointer; background: #333; padding: 2px 5px; border-radius: 4px; border: 1px solid #555; margin-left: 4px;">
-                    <input type="checkbox" id="fast-mode-checkbox" onchange="toggleFastMode(this.checked)"> Sem Intervalo
-                </label>
+                | 🕒 <span id="game-clock" style="color: #4fc3f7; font-weight: bold; font-family: monospace;">06:00</span>
+                | <span style="color: #ffeb3b;">Turno: <strong id="next-agent">-</strong> (<strong id="countdown">5.0</strong>s)</span>
             </div>
-            <div style="font-size: 14px; text-align: right; color: #ffeb3b;">Turno de: <strong id="next-agent">-</strong> em <strong id="countdown">5.0</strong>s</div>
         </div>
         <div id="status-panel">
             <div id="volume-control">
@@ -54,10 +56,6 @@
                     <!-- Life records will populate here -->
                 </div>
             </div>
-            <div id="controls-panel" style="margin-top: 15px; display: flex; gap: 8px;">
-                <button class="control-btn" onclick="resetGame(document.getElementById('player-count-selector').value)" style="flex:1; background: #444; color: #ffeb3b; border: 1px solid #ffeb3b; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">🔄 Reiniciar</button>
-                <button class="control-btn" id="toggle-camera" onclick="toggleCameraMode()" style="flex:1; background: #444; color: #ffeb3b; border: 1px solid #ffeb3b; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">🎥 Cam: Fixa</button>
-            </div>
         </div>
 
         <div id="inventories">
@@ -71,6 +69,9 @@
                 <button class="filter-btn" id="filter-maria" onclick="setChatFilter('Maria')" style="display:none">Maria</button>
                 <button class="filter-btn" id="filter-zeca" onclick="setChatFilter('Zeca')" style="display:none">Zeca</button>
                 <button class="filter-btn" id="filter-elly" onclick="setChatFilter('Elly')" style="display:none">Elly</button>
+                <label style="margin-left: auto; font-size: 11px; cursor: pointer; display: flex; align-items: center; color: #ccc;">
+                    <input type="checkbox" id="chat-autoscroll" checked style="margin-right: 4px;"> Autoscroll
+                </label>
             </div>
             <ul id="chat-messages"></ul>
         </div>
