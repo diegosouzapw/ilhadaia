@@ -56,7 +56,7 @@ A ilha é um grid **20×20 tiles**. O sistema de coordenadas é `(x, y)` onde:
 
 **Recuperação:** Se `hunger > 70` AND `thirst > 70`: `+1 a +2 HP/tick`
 
-**Bônus de carregar corpo:** Enquanto carrega um corpo, o agente tem vitals travados em 100 e HP em 100 (altruísmo recompensado).
+**Bônus de carregar corpo:** Enquanto carrega um corpo, o agente tem vitals travados em 100, HP em 100 e amizade restaurada para 100 (altruísmo recompensado).
 
 ---
 
@@ -97,6 +97,8 @@ Agente morre
 
 **Miasma:** Se há algum corpo não enterrado, **todos os vivos** perdem 1-2 HP/tick.
 
+**Observação adicional:** o prompt atual dos agentes já instrui sobreviventes a buscarem abrigo e zumbis a tentarem sobreviver escondidos para se curar, o que reforça a "novela emergente" da ilha.
+
 ---
 
 ## Sistema de Score
@@ -114,6 +116,11 @@ Hall of Fame salva top 3 por `score = apples_eaten + water_drunk + chats_sent`.
 ### Vitórias por sessão
 Guardado em `scores` dict: `scores[name] = count_of_wins`.
 
+### Limitações do score atual
+- Não registra qual modelo foi usado pelo agente
+- Não separa sobrevivência, utilidade social e eficiência
+- Não persiste histórico completo por sessão
+
 ---
 
 ## Pathfinding (BFS)
@@ -123,6 +130,44 @@ O mundo usa **BFS (Breadth-First Search)** para pathfinding:
 - Obstáculos: `tree`, `stone`, `water`, `agent` vivo
 - Destinos inalcançáveis (ex: lago): chega **adjacente** (dist ≤ 1)
 - Sem heurística (A*): O(n²) por busca, adequado para grid 20x20
+
+---
+
+## Sistema de Decisão da IA
+
+O motor suporta dois modos:
+
+1. **Turn-based** (`ai_interval > 0`)  
+   Um agente elegível pensa a cada `N` ticks.
+
+2. **Paralelo** (`ai_interval = 0`)  
+   Todos os agentes elegíveis podem pensar a cada tick.
+
+Um agente **não é consultado pela IA** quando:
+- Está morto
+- É remoto (`is_remote=True`)
+- Já está caminhando automaticamente para um destino
+- Acabou de chegar ao destino no tick atual
+- Já está aguardando resposta da IA (`thinking_agents`)
+
+Esse detalhe é importante porque o custo real da simulação depende mais da elegibilidade do agente do que apenas do valor bruto do tick loop.
+
+---
+
+## Percepção do Agente
+
+O contexto usado pela IA inclui:
+- `visible_entities` — entidades visíveis na vizinhança
+- `reachable_now` — recursos/ações imediatamente alcançáveis
+- `inventory`
+- `is_night`
+- `is_carrying_body`
+- `carrying_name`
+- destino automático atual (`is_moving_automatically_to`)
+
+**Alcance visual atual:** até distância Manhattan ~12 para entidades relevantes.
+
+Isso ajuda a explicar por que a IA às vezes "sabe" sobre corpos, lago, cemitério ou outros agentes sem enxergar o mapa inteiro.
 
 ---
 
@@ -148,3 +193,5 @@ Após `game_over`, o mundo aguarda **120 ticks (2 minutos)** e então reinicia a
 Quando um agente é enterrado ou um zumbi é destruído:
 - Um novo agente da lista `extra_names` (Beto, Carla, Dudu, Eva, Fabio, Gabi) é spawned após **10 ticks**.
 - Mantém a ilha sempre com agentes ativos.
+
+**Observação:** esse comportamento já é uma boa base para futuros papéis/skills por persona, porque o pipeline de entrada de novos agentes já existe.

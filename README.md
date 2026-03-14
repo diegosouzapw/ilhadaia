@@ -37,6 +37,8 @@ Frontend (Three.js 3D)  ←→  WebSocket + REST  ←→  Backend (FastAPI + asy
 - **Frontend**: Three.js (3D), Vanilla JS, WebSocket observer
 - **IA**: Google Gemini (hardcoded no v1.0, multi-provider no roadmap)
 - **Pathfinding**: BFS em grid 20×20
+- **Persistência atual**: `hall_of_fame.json` e `world_settings.json`
+- **Limitações conhecidas**: WebSocket single-worker, memória curta em lista e provider Gemini acoplado ao `agent.py`
 
 ---
 
@@ -60,6 +62,8 @@ uvicorn main:app --reload
 
 # 4. Frontend: abrir frontend/index.html no browser
 ```
+
+> 💡 **Dica:** para evitar limitações de `file://` em alguns navegadores, também funciona servir o frontend com `python -m http.server 3000` dentro de `frontend/`.
 
 ---
 
@@ -115,11 +119,13 @@ Ver [`GUIDE_VISITANTE.md`](./GUIDE_VISITANTE.md) para guia completo.
 
 | Documento | Descrição |
 |-----------|-----------|
-| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Diagrama e componentes do sistema |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Diagrama, componentes do sistema e limites atuais |
 | [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) | Todos os endpoints REST + WebSocket |
-| [`docs/GAME_STATE.md`](./docs/GAME_STATE.md) | Lógica de simulação, ciclo dia/noite, zumbis |
+| [`docs/GAME_STATE.md`](./docs/GAME_STATE.md) | Lógica de simulação, ciclo dia/noite, zumbis e turnos de IA |
 | [`docs/DEVELOPMENT_GUIDE.md`](./docs/DEVELOPMENT_GUIDE.md) | Como contribuir e estender |
-planejadas |
+| [`docs/IMPROVEMENT_PLAN.md`](./docs/IMPROVEMENT_PLAN.md) | Melhorias planejadas e roadmap |
+| [`docs/CURRENT_STATE_AUDIT.md`](./docs/CURRENT_STATE_AUDIT.md) | Auditoria técnica complementar do estado atual |
+| [`docs/TARGET_ARCHITECTURE.md`](./docs/TARGET_ARCHITECTURE.md) | Arquitetura alvo complementar da versão turbinada |
 
 ---
 

@@ -85,6 +85,7 @@ ilhadaia/
 - Trocar `self.model_name` em `agent.py`
 - Modelos disponíveis no Google AI Studio
 - Verificar compatibilidade de `response_mime_type="application/json"`
+- Se a ideia for multi-provider, prefira criar um adapter novo em vez de crescer o acoplamento dentro de `agent.py`
 
 ---
 
@@ -131,6 +132,7 @@ curl -X POST http://localhost:8000/agent/777/action \
 - Logging via `logging.getLogger("BBB_IA")`
 - Persistência via JSON (hall_of_fame.json, world_settings.json)
 - Ações validadas sempre em `world._apply_action()`
+- Evitar empurrar regra crítica de negócio para o prompt quando ela puder ficar no engine
 
 ### Frontend (JavaScript)
 - Sem frameworks — Vanilla JS
@@ -154,6 +156,8 @@ gunicorn main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 
 > **Nginx** pode ser usado como proxy reverso. Ver `docs/IMPROVEMENT_PLAN.md` para plano de escalabilidade.
 
+**Observação adicional:** o uso atual de `@app.on_event("startup")` funciona bem para o protótipo. Se o backend crescer, vale migrar para `lifespan` para controlar melhor startup/shutdown de recursos.
+
 ---
 
 ## Debugging
@@ -168,6 +172,14 @@ uvicorn main:app --log-level debug
 ```bash
 # Ver estado atual pelo endpoint raiz
 curl http://localhost:8000/
+```
+
+> **Nota:** o endpoint raiz mostra apenas status + ticks. O estado completo do mundo vem pelo WebSocket `/ws`.
+
+### Inspecionar persistência local
+```bash
+cat backend/world_settings.json
+cat backend/hall_of_fame.json
 ```
 
 ### Inspecionar via WebSocket

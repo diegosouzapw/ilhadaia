@@ -30,6 +30,8 @@ Status da engine.
 }
 ```
 
+**Observação:** este endpoint é apenas um heartbeat da engine. O estado completo do mundo é entregue pelo WebSocket `/ws`.
+
 ---
 
 ### `POST /reset` 🔒 (Admin)
@@ -48,6 +50,8 @@ Reinicia o jogo. Requer `X-Admin-Token`.
 }
 ```
 
+**Observação:** no estado atual do código, o squad inicial padrão cobre até 4 agentes base (`João`, `Maria`, `Zeca`, `Elly`).
+
 ---
 
 ### `POST /settings/ai_interval` 🔒 (Admin)
@@ -65,6 +69,8 @@ Define o intervalo de decisão da IA (em ticks).
     "new_interval": 5
 }
 ```
+
+**Observação:** `interval=0` é o modo mais caro, porque permite pensar em paralelo sempre que um agente estiver elegível.
 
 ---
 
@@ -127,6 +133,8 @@ Retorna o contexto atual do agente remoto (o que ele vê, status de vitals, inve
 }
 ```
 
+**Observação:** `visible_entities` usa o recorte perceptivo atual do motor; não é o estado total do mapa.
+
 ---
 
 ### `POST /agent/{agent_id}/action`
@@ -172,6 +180,8 @@ Remove um agente da ilha.
     "agent_id": "777"
 }
 ```
+
+**Observação importante:** a documentação trata esta rota como administrativa, mas o código atual ainda não valida `X-Admin-Token` nela. Esse ajuste é simples e já está mapeado no plano de melhorias.
 
 ---
 
@@ -277,6 +287,8 @@ const ws = new WebSocket("ws://localhost:8000/ws");
 }
 ```
 
+**Observação:** no estado serializado atual, `winner_id` é o campo efetivamente usado. `winner` aparece apenas como referência conceitual na documentação/schema.
+
 ### Tipos de Entidade
 | Tipo | Descrição |
 |------|-----------|
@@ -302,6 +314,8 @@ const ws = new WebSocket("ws://localhost:8000/ws");
    d. Aguardar N segundos
 3. Observar via WebSocket /ws para ver todos os eventos
 ```
+
+**Dica prática:** se o seu agente usar LLM externo, vale respeitar o `ai_interval` do servidor e aplicar um pequeno cooldown local para evitar spam de decisões.
 
 ---
 

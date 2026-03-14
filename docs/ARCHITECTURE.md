@@ -81,6 +81,7 @@ O BBBia é uma simulação de sobrevivência social onde agentes de IA competem 
 **Limitações conhecidas:**
 - Single worker: `ConnectionManager` usa lista em memória, não funciona com múltiplos processos.
 - `world_loop()` roda em único asyncio event loop.
+- A rota `DELETE /agent/{id}` ainda não valida `X-Admin-Token` no código atual, embora a intenção da API/documentação seja tratá-la como rota administrativa.
 
 ---
 
@@ -119,6 +120,11 @@ World {
 - `hall_of_fame.json`: Histórico de recordes top 3
 - `world_settings.json`: `ai_interval`, `player_count`
 
+**Pontos de melhoria já identificados:**
+- Extrair regras determinísticas para facilitar testes
+- Substituir score simplificado por scoreboard persistente por agente/modelo
+- Adicionar snapshots/replay sem transformar o `World` em serviço separado cedo demais
+
 ---
 
 ### 3. `backend/agent.py` — Agente de IA
@@ -156,6 +162,10 @@ World.tick()
 
 **Memória:** Lista simples de últimos 10 thoughts. **Não persiste entre sessões.**
 
+**Observações técnicas adicionais:**
+- O parsing do JSON ainda é manual. Structured output com schema tipado é uma melhoria prioritária.
+- O provider está acoplado ao próprio `Agent`; benchmark multi-provider exige adapter separado.
+
 ---
 
 ### 4. `frontend/` — Observer 3D
@@ -172,6 +182,11 @@ World.tick()
 - Labels de nome (CSS overlay)
 - Cone de visão do agente (Three.js mesh)
 - HUD: stats, hall of fame, clock, controles admin
+
+**Detalhes adicionais relevantes:**
+- Usa `localStorage` para histórico de chat, volume e `adminToken`
+- Reaproveita o mesmo stream WebSocket para render, eventos e HUD
+- Já funciona bem como cockpit de debug para replay/benchmark futuro
 
 ---
 
@@ -206,3 +221,14 @@ World.tick()
 | Sem scoreboard persistente por modelo | Não é um benchmark real |
 | Sem budget de tokens por agente | Custo pode escalar |
 | Sem rate limiting no AI dispatch | Risco de spam de API |
+| `DELETE /agent/{id}` sem proteção real no código | Brecha administrativa simples de corrigir |
+
+---
+
+## Próximos Passos de Arquitetura (sem trocar a stack)
+
+1. Extrair adapter de IA (`GeminiAdapter`, `OmniRouterAdapter`, etc.)
+2. Adicionar budget/cooldown por agente
+3. Registrar decision logs e snapshots de replay
+4. Substituir score em JSON por scoreboard persistente leve (SQLite)
+5. Modularizar backend em passos pequenos, sem reescrever o protótipo

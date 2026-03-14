@@ -13,6 +13,12 @@ O protótipo atual prova que a ideia funciona: agentes de IA com personalidade, 
 
 Após análise técnica completa do código atual e pesquisa de viabilidade, **15 das 16 ideias principais são implementáveis** na arquitetura atual sem mudança de tecnologia. Apenas a integração nativa com Roblox exige adaptação (mas o backend pode ser usado como endpoint para Roblox também).
 
+Além disso, o levantamento revelou **4 ajustes arquiteturais obrigatórios** para a próxima fase:
+- proteger corretamente rotas administrativas como `DELETE /agent/{id}`
+- substituir parsing manual por structured output/schema tipado quando possível
+- tirar score/replay do JSON solto e levar para persistência leve
+- manter o backend em single-worker até existir um backend de broadcast real para WebSocket
+
 ---
 
 ## ✅ O que PODE ser feito (na arquitetura atual)
@@ -29,6 +35,7 @@ Após análise técnica completa do código atual e pesquisa de viabilidade, **1
 - Implementar `GeminiAdapter`, `OmniRouterAdapter` (via HTTP)
 - Cada agente recebe um `model_profile` (YAML/dict)
 - Fallback automático por custo/erro
+- Usar structured output/schema tipado para reduzir fragilidade do parse
 
 **Perfis por agente (como a conversa sugere):**
 ```yaml
@@ -62,6 +69,7 @@ profiles:
 - Cooldown mínimo configurável por agente
 - Alertas quando budget > 80%
 - Telemetria: latência, custo estimado, tokens por decisão
+- Se alguns perfis permanecerem no ecossistema Gemini, avaliar **context caching** para prompts repetidos
 
 ---
 
@@ -72,7 +80,8 @@ profiles:
 
 **Solução:**
 - Criar `backend/decision_log.py` que salva NDJSON line-by-line
-- Logar por decisão: agent_id, tick, model, latency_ms, tokens, thought, action, result
+- Logar por decisão: agent_id, tick, model, provider, profile, latency_ms, tokens, thought, action, result
+- Incluir `session_id` para correlação com replay e scoreboard
 - Endpoint `GET /logs/decisions?session_id=X` para download
 - Base para replay e benchmark
 
@@ -90,6 +99,7 @@ profiles:
 
 **Solução:**
 - Salvar `world_state` snapshot a cada N ticks em arquivo NDJSON
+- Salvar também o log de eventos entre snapshots
 - Novo endpoint `GET /sessions` lista sessões gravadas
 - Novo endpoint `GET /sessions/{id}/replay` serve estado tick-a-tick
 - Frontend: botão "Assistir gravação" carrega replay
@@ -110,6 +120,7 @@ profiles:
 - Endpoint `GET /worlds/{worldId}/scoreboard` retorna ranking por dimensão
 - Comparativo histórico por modelo de IA
 - SQLite (via `sqlite3` stdlib) — sem dependência extra
+- Preferir modo WAL para leitura concorrente leve
 
 **Schema SQLite proposto:**
 ```sql
@@ -200,6 +211,8 @@ backend/
 
 **Benefício:** Facilita testes unitários, benchmark isolado, e futura integração com Roblox (mesmo backend).
 
+**Nota prática:** a extração pode ser gradual, preservando `main.py` como bootstrap durante a transição.
+
 ---
 
 #### M08 — Regras Determinísticas vs IA (Separação Clara)
@@ -247,6 +260,8 @@ backend/
    |--------|--------|-------|--------|-------|-------|
 
 4. **Controle de replay** — Slider de progresso, play/pause, velocidade
+
+5. **Painel técnico opcional** — latência média por modelo, agentes aguardando IA e budget restante
 
 ---
 
@@ -296,6 +311,8 @@ GET  /tournaments/{id}/results → resultado final
 - `social`: Quem tem mais chats + enterros + amizade
 - `efficiency`: Relação custo/performance (custo em USD por ponto de score)
 
+**Expansão natural:** ranking por provider, por profile e por persona.
+
 ---
 
 ### 🟢 Baixa Prioridade — Melhorias de Qualidade
@@ -340,15 +357,18 @@ services:
 - Permite múltiplos workers Uvicorn (horizontal scale)
 - **Necessário apenas se quiser múltiplos workers** (baixa prioridade para demo)
 
+**Observação:** isso confirma o limite já observado no código atual e é uma melhoria de infraestrutura, não de gameplay.
+
 ---
 
 #### M15 — README e Docs Completos
 **Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Baixo
 
 - README atualizado com arquitetura, screenshots, badges
-- Documentação em `/docs` (já iniciada neste sprint)
+- Documentação em `/docs`
 - ADR (Architecture Decision Records) para decisões importantes
 - `CONTRIBUTING.md` para colaboradores
+- Notas de divergência entre documentação e implementação quando houver comportamento ainda não corrigido
 
 ---
 
@@ -371,6 +391,16 @@ O ChatGPT sugeriu "vector DB depois" para memória. Para o escopo atual, **dict 
 **Status:** ❌ Fora de escopo | **Motivo:** Feature Roblox específica
 
 O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
+
+### 500 Modelos ao Mesmo Tempo no Primeiro Ciclo
+**Status:** ❌ Não recomendado | **Motivo:** Custo, observabilidade e governança do caos
+
+A ideia é boa como visão de longo prazo, mas antes disso a ilha precisa de:
+- budget por agente
+- replay
+- decision log
+- scoreboard persistente
+- fallback por provider
 
 ---
 
@@ -395,6 +425,7 @@ O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
 | M15 | Docs completos | ✅ Sim | 🔥🔥 | Baixo | 🔴 Alta |
 | R01 | Integração Roblox | ❌ Não | — | Muito alto | ❌ |
 | R02 | Vector DB memória | ❌ Overkill | — | Alto | ❌ |
+| R03 | 500 modelos no primeiro ciclo | ❌ Não recomendado | — | Muito alto | ❌ |
 
 ---
 
@@ -403,7 +434,8 @@ O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
 ### v0.2 — Engine Confiável (Quick Wins)
 > **Objetivo:** Base sólida para benchmark. Sem mudar gameplay.
 
-- [x] Documentação técnica `/docs` ← **esta sprint**
+- [x] Documentação técnica `/docs`
+- [ ] Corrigir `DELETE /agent/{id}` para exigir admin token
 - [ ] M02 — Budget de tokens e cooldown
 - [ ] M03 — Decision Log NDJSON estruturado
 - [ ] M05 — Scoreboard SQLite detalhado
@@ -417,7 +449,7 @@ O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
 ### v0.3 — Multi-Provider Benchmark
 > **Objetivo:** Transformar a ilha em benchmark real de modelos de IA.
 
-- [ ] M01 — AI Adapter multi-provider (OmniRouter + Gemini + OpenAI)
+- [ ] M01 — AI Adapter multi-provider (OmniRouter + Gemini + OpenAI-compatible)
 - [ ] M07 — Refatoração simulation-core modular
 - [ ] M08 — Separação regras determinísticas
 - [ ] M06 — Memória em 4 camadas
@@ -461,7 +493,8 @@ O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
 
 ## 💡 Próximos Passos Imediatos
 
-1. Implementar **M02 (Budget)** + **M03 (Decision Log)** — Levam < 1 dia
-2. Criar **SQLite scoreboard (M05)** — Substitui o JSON frágil atual
-3. Criar **AI Adapter (M01)** com OmniRouter — O cenário mais empolgante
-4. Começar com 2-3 modelos diferentes por NPC e gravar estatísticas
+1. Corrigir `DELETE /agent/{id}` para exigir `X-Admin-Token`
+2. Implementar **M02 (Budget)** + **M03 (Decision Log)** — Levam < 1 dia
+3. Criar **SQLite scoreboard (M05)** — Substitui o JSON frágil atual
+4. Criar **AI Adapter (M01)** com OmniRouter — O cenário mais empolgante
+5. Começar com 2-3 modelos diferentes por NPC e gravar estatísticas
