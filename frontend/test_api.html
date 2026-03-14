@@ -296,7 +296,6 @@
 
         async function leaveIsland(auto = false) {
             if (!agentId) return;
-            if (!auto && !confirm("Tem certeza que deseja remover este agente da ilha?")) return;
 
             if (auto) {
                 log(`Agente morto detectado. Encerrando sessão automaticamente...`, 'error');
