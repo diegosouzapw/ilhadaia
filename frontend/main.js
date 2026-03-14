@@ -66,14 +66,33 @@ document.getElementById('volume-slider').value = globalVolume;
 // --- Sound System ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-function updateVolume(val) {
-    globalVolume = parseFloat(val);
-    localStorage.setItem('bbb_volume', val);
+// --- Configuração de URLs Dinâmicas ---
+// Se estiver rodando localmente (localhost, 127.0.0.1 ou via arquivo direto), aponta para o localhost:8000
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '';
+
+const API_BASE_URL = isLocal 
+    ? 'http://localhost:8000' 
+    : `${window.location.protocol}//${window.location.host}/api`;
+
+const WS_URL = isLocal
+    ? 'ws://localhost:8000/ws'
+    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+
+// Tenta carregar o Admin Token do localStorage ou pede ao usuário se for necessário
+let adminToken = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
+
+function setAdminToken(token) {
+    adminToken = token;
+    localStorage.setItem('bbb_admin_token', token);
+    console.log("Admin Token atualizado.");
 }
 
 async function updateTickInterval(val) {
     try {
-        await fetch(`http://localhost:8000/settings/ai_interval?interval=${val}`, { method: 'POST' });
+        await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
+            method: 'POST',
+            headers: { 'X-Admin-Token': adminToken }
+        });
         console.log("AI Interval updated to:", val);
     } catch (e) {
         console.error("Failed to update AI interval", e);
@@ -86,12 +105,18 @@ async function toggleFastMode(isFast) {
         if (isFast) {
             // Parallel mode: interval = 0
             if (dropdown) dropdown.disabled = true;
-            await fetch(`http://localhost:8000/settings/ai_interval?interval=0`, { method: 'POST' });
+            await fetch(`${API_BASE_URL}/settings/ai_interval?interval=0`, { 
+                method: 'POST',
+                headers: { 'X-Admin-Token': adminToken }
+            });
         } else {
             // Restore turn-based mode from dropdown value
             const val = dropdown ? dropdown.value : 5;
             if (dropdown) dropdown.disabled = false;
-            await fetch(`http://localhost:8000/settings/ai_interval?interval=${val}`, { method: 'POST' });
+            await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
+                method: 'POST',
+                headers: { 'X-Admin-Token': adminToken }
+            });
         }
         console.log("Fast mode set to:", isFast);
     } catch (e) {
@@ -445,7 +470,7 @@ let socket;
 let nextTickTime = Date.now() + 5000;
 
 function connectWebSocket() {
-    socket = new WebSocket("ws://127.0.0.1:8000/ws");
+    socket = new WebSocket(WS_URL);
 
     socket.onopen = () => {
         wsStatus.textContent = "Conectado";
@@ -886,12 +911,17 @@ async function resetGame(count) {
     // If count not provided, try to read from dropdown
     const playerCount = count || document.getElementById('player-count-selector')?.value || 4;
     try {
-        const response = await fetch(`http://localhost:8000/reset?player_count=${playerCount}`, { method: 'POST' });
+        const response = await fetch(`${API_BASE_URL}/reset?player_count=${playerCount}`, { 
+            method: 'POST',
+            headers: { 'X-Admin-Token': adminToken }
+        });
         if (response.ok) {
             chatHistory = [];
             localStorage.removeItem('bbb_chat_history');
             renderChat();
             // The server will broadcast the reset
+        } else if (response.status === 401) {
+            alert("Não autorizado. Verifique seu Admin Token no console (setAdminToken('seu_token')).");
         }
     } catch (e) {
         console.error("Reset failed", e);

@@ -3,6 +3,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import logging
+import os
+from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 
 from world import World
 from agent import Agent
@@ -11,12 +14,26 @@ from agent import Agent
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("BBB_IA")
 
+# Load environment variables
+load_dotenv()
+
+# Configuration
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123") # Default for dev
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 app = FastAPI(title="BBB de IA - Backend Engine")
 
-# Allow CORS for local frontend development
+# Security dependency
+async def verify_admin_token(x_admin_token: str = Header(None)):
+    if x_admin_token != ADMIN_TOKEN:
+        logger.warning(f"Unauthorized access attempt with token: {x_admin_token}")
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing Admin Token")
+    return x_admin_token
+
+# Allow CORS for dynamic origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,13 +116,13 @@ async def websocket_endpoint(websocket: WebSocket):
 def read_root():
     return {"status": "World engine is running", "ticks": world.ticks}
 
-@app.post("/reset")
+@app.post("/reset", dependencies=[Depends(verify_admin_token)])
 async def reset_game(player_count: int = 4):
     world.reset_agents(Agent, player_count=player_count)
     await manager.broadcast({"type": "reset", "data": world.get_state()})
     return {"status": "World reset successful", "player_count": player_count}
 
-@app.post("/settings/ai_interval")
+@app.post("/settings/ai_interval", dependencies=[Depends(verify_admin_token)])
 async def set_ai_interval(interval: int):
     world.ai_interval = max(0, interval)
     world._save_history() # Persist change

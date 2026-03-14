@@ -104,7 +104,8 @@ class Agent:
         current_key = get_current_key()
         try:
              self.client = genai.Client(api_key=current_key) if current_key else None
-             self.model_name = 'gemini-3.1-flash-lite-preview'
+             #self.model_name = 'gemini-3.1-flash-lite-preview'
+             self.model_name = 'gemini-2.5-flash-lite'
              self.system_instruction = system_instruction
         except Exception as e:
             logger.error(f"Failed to init model client: {e}")
