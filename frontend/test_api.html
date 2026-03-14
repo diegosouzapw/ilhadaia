@@ -221,6 +221,17 @@
                         <button onclick="sendAction('move', {dx: 0, dy: 1})">▼</button>
                         <div></div>
                     </div>
+                    <div style="margin-top: 15px; display: flex; gap: 5px; align-items: flex-end;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.7rem; display: block; margin-bottom: 2px;">Destino X</label>
+                            <input type="number" id="move-x" value="10" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.7rem; display: block; margin-bottom: 2px;">Destino Y</label>
+                            <input type="number" id="move-y" value="10" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
+                        </div>
+                        <button onclick="sendMoveTo()" style="width: auto; padding: 0 15px; font-size: 0.85rem; background: #6366f1; height: 32px; font-weight: bold; margin-bottom: 0;">IR PARA</button>
+                    </div>
                 </div>
                 <div>
                     <div class="form-group">
@@ -352,6 +363,16 @@
             } catch (e) {
                 log(`Erro ao buscar contexto: ${e.message}`, 'error');
             }
+        }
+
+        async function sendMoveTo() {
+            const tx = document.getElementById('move-x').value;
+            const ty = document.getElementById('move-y').value;
+            if (tx === "" || ty === "") {
+                log("Coordenadas X e Y são necessárias!", "error");
+                return;
+            }
+            await sendAction('move_to', { target_x: parseInt(tx), target_y: parseInt(ty) });
         }
 
         async function sendAction(action, params = {}) {
