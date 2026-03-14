@@ -172,7 +172,7 @@
             </div>
             <button id="btn-join" onclick="joinIsland()">Entrar na Simulação</button>
             <div style="margin-top: 15px; font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
-                <div>ID: <span id="display-id" class="status-badge">Nenhum</span></div>
+                <div id="connection-status" style="color: var(--success); font-weight: bold;">Disponível</div>
                 <button id="btn-leave" onclick="leaveIsland()" style="width: auto; background: var(--danger); font-size: 0.7rem; padding: 4px 8px;" disabled>Sair da Ilha</button>
             </div>
         </div>
@@ -279,7 +279,8 @@
                 
                 if (res.ok) {
                     agentId = data.agent_id;
-                    document.getElementById('display-id').textContent = "********";
+                    document.getElementById('connection-status').textContent = "CONECTADO";
+                    document.getElementById('join-id').value = ""; // Limpa a chave por segurança
                     document.getElementById('btn-join').disabled = true;
                     document.getElementById('btn-leave').disabled = false;
                     document.getElementById('btn-refresh').disabled = false;
@@ -307,7 +308,8 @@
                 if (res.ok) {
                     log(`Agente removido com sucesso.`);
                     agentId = null;
-                    document.getElementById('display-id').textContent = "Nenhum";
+                    document.getElementById('connection-status').textContent = "Disponível";
+                    document.getElementById('connection-status').style.color = "var(--success)";
                     document.getElementById('btn-join').disabled = false;
                     document.getElementById('btn-leave').disabled = true;
                     document.getElementById('btn-refresh').disabled = true;
