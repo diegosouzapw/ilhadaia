@@ -152,8 +152,14 @@ async def join_island(req: JoinRequest):
         raise HTTPException(status_code=401, detail="ID de Acesso não autorizado.")
 
     # 2. Verificar se o ID já está em uso na ilha
-    if any(a.id == req.agent_id for a in world.agents):
-        raise HTTPException(status_code=400, detail="Este ID já está em uso na ilha.")
+    existing_agent = next((a for a in world.agents if a.id == req.agent_id), None)
+    if existing_agent:
+        if existing_agent.is_alive:
+            raise HTTPException(status_code=400, detail="Este ID já está em uso por um agente Vivo.")
+        else:
+            # Se está morto, removemos o corpo antigo para dar lugar à nova entrada
+            logger.info(f"Agent {existing_agent.name} with ID {req.agent_id} is dead. Removing to allow replacement.")
+            world.remove_agent(req.agent_id)
 
     # Create a new remote agent
     new_agent = Agent(req.name, req.personality, 10, 10, is_remote=True, agent_id=req.agent_id)

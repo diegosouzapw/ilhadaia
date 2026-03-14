@@ -294,11 +294,15 @@
             }
         }
 
-        async function leaveIsland() {
+        async function leaveIsland(auto = false) {
             if (!agentId) return;
-            if (!confirm("Tem certeza que deseja remover este agente da ilha?")) return;
+            if (!auto && !confirm("Tem certeza que deseja remover este agente da ilha?")) return;
 
-            log(`Tentando encerrar sessão na ilha...`, 'out');
+            if (auto) {
+                log(`Agente morto detectado. Encerrando sessão automaticamente...`, 'error');
+            } else {
+                log(`Tentando encerrar sessão na ilha...`, 'out');
+            }
             try {
                 const res = await fetch(`${API_URL}/agent/${agentId}`, {
                     method: 'DELETE'
@@ -333,6 +337,10 @@
                 const data = await res.json();
                 
                 if (res.ok) {
+                    if (data.status && data.status.hp <= 0) {
+                        leaveIsland(true);
+                        return;
+                    }
                     document.getElementById('stat-hp').textContent = data.status.hp;
                     document.getElementById('stat-hunger').textContent = data.status.hunger;
                     document.getElementById('stat-thirst').textContent = data.status.thirst;
@@ -366,6 +374,11 @@
                 });
                 const data = await res.json();
                 log(`Resposta: ${data.status}`);
+
+                if (data.status === "Agent is dead") {
+                    leaveIsland(true);
+                    return;
+                }
                 // Auto refresh after action
                 setTimeout(getContext, 800);
             } catch (e) {
