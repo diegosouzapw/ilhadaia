@@ -200,7 +200,7 @@
             </div>
             <div style="margin-top: 15px;">
                 <label>O que você vê:</label>
-                <div id="vision-list" style="font-size: 0.75rem; color: var(--text-muted); max-height: 80px; overflow-y: auto; background: #0f172a; padding: 5px; border-radius: 4px;">--</div>
+                <div id="vision-list" style="font-size: 0.75rem; color: var(--text-muted); min-height: 160px; max-height: 250px; overflow-y: auto; background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #1e293b;">--</div>
             </div>
         </div>
 
@@ -224,11 +224,11 @@
                     <div style="margin-top: 15px; display: flex; gap: 5px; align-items: flex-end;">
                         <div style="flex: 1;">
                             <label style="font-size: 0.7rem; display: block; margin-bottom: 2px;">Destino X</label>
-                            <input type="number" id="move-x" value="10" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
+                            <input type="number" id="move-x" value="15" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
                         </div>
                         <div style="flex: 1;">
                             <label style="font-size: 0.7rem; display: block; margin-bottom: 2px;">Destino Y</label>
-                            <input type="number" id="move-y" value="10" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
+                            <input type="number" id="move-y" value="15" style="padding: 4px; background: #0f172a; border: 1px solid #334155; color: white; width: 100%;">
                         </div>
                         <button onclick="sendMoveTo()" style="width: auto; padding: 0 15px; font-size: 0.85rem; background: #6366f1; height: 32px; font-weight: bold; margin-bottom: 0;">IR PARA</button>
                     </div>
@@ -291,7 +291,7 @@
                 if (res.ok) {
                     agentId = data.agent_id;
                     document.getElementById('connection-status').textContent = "CONECTADO";
-                    document.getElementById('join-id').value = ""; // Limpa a chave por segurança
+                    // Manter a chave no campo para facilitar reconexão conforme pedido
                     document.getElementById('btn-join').disabled = true;
                     document.getElementById('btn-leave').disabled = false;
                     document.getElementById('btn-refresh').disabled = false;
