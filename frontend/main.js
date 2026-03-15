@@ -53,6 +53,8 @@ let chatHistory = JSON.parse(localStorage.getItem('bbb_chat_history') || '[]');
 let chatFilter = "all";
 let globalVolume = parseFloat(localStorage.getItem('bbb_volume') || '0.5');
 let currentDayCycle = 0; // 0-119, updated from server
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
 
 // Day/Night color targets
 const DAY_SKY = new THREE.Color(0x87CEEB);
@@ -703,6 +705,9 @@ function updateWorld(data) {
             
             if (mesh) {
                 mesh.position.set(pos.x, 0, pos.z);
+                mesh.userData = mesh.userData || {};
+                mesh.userData.entityId = id;
+                mesh.userData.entityType = entity.type;
                 scene.add(mesh);
                 meshes[id] = mesh;
             }
@@ -840,6 +845,35 @@ function updateWorld(data) {
         }
     }
     invContainer.innerHTML = invHTML;
+}
+
+function findAgentRoot(object3d) {
+    let current = object3d;
+    while (current) {
+        if (current.userData && current.userData.entityType === 'agent') {
+            return current;
+        }
+        current = current.parent;
+    }
+    return null;
+}
+
+function handleWorldClick(event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+
+    const hits = raycaster.intersectObjects(scene.children, true);
+    for (const hit of hits) {
+        const agentRoot = findAgentRoot(hit.object);
+        if (!agentRoot) continue;
+        const agentId = agentRoot.userData?.entityId;
+        if (agentId && typeof showAgentModal === 'function') {
+            showAgentModal(agentId);
+        }
+        break;
+    }
 }
 
 // T13/T16: renderer de replay chamado por benchmark.js
@@ -1136,3 +1170,4 @@ window.toggleCameraMode = function() {
 };
 
 animate();
+renderer.domElement.addEventListener('click', handleWorldClick);

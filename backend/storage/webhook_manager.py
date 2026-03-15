@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 );
 """
 
-VALID_EVENTS = {"death", "win", "zombie", "tournament_end", "agent_registered", "all"}
+VALID_EVENTS = {"death", "win", "zombie", "tournament_end", "agent_registered", "test", "all"}
 
 
 class WebhookManager:

@@ -986,9 +986,15 @@ class World:
                     "is_zombie": getattr(a, "is_zombie", False),
                     "tokens_used": getattr(a, "tokens_used", 0),
                     "token_budget": getattr(a, "token_budget", 10000),
+                    "cooldown_remaining": max(
+                        0,
+                        int(getattr(a, "cooldown_ticks", 0))
+                        - (self.ticks - int(getattr(a, "last_thought_tick", -99))),
+                    ),
                     "profile_id": getattr(a, "profile_id", "gemini-native"),
                     "owner_id": getattr(a, "owner_id", ""),
                     "benchmark": getattr(a, "benchmark", {}),
+                    "cost_usd": float(getattr(a, "benchmark", {}).get("cost_usd", 0.0)),
                 }
                 for a in self.agents
             ],
