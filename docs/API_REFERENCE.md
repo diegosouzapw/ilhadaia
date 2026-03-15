@@ -1,329 +1,301 @@
-# 📡 API Reference — BBBia: A Ilha da IA
+# 📡 API Reference — BBBia Versão Turbinada v0.5
 
-> **Base URL (local):** `http://localhost:8000`  
-> **WebSocket:** `ws://localhost:8000/ws`
+> **Base URL:** `http://localhost:8001`  
+> **WebSocket:** `ws://localhost:8001/ws`  
+> **Dashboard:** `frontend/dashboard.html`
 
 ---
 
-## Autenticação
+## 🔐 Autenticação
 
-Endpoints administrativos requerem o header `X-Admin-Token`.
+Endpoints administrativos requerem o header:
 
 ```
 X-Admin-Token: <ADMIN_TOKEN>
 ```
 
-O `ADMIN_TOKEN` é configurado no `.env`. Default: `dev_token_123`.
+Configurado no `.env` — default: `dev_token_123`.
 
 ---
 
-## REST Endpoints
+## 🌐 Status e Sistema
 
 ### `GET /`
 Status da engine.
+```json
+{ "status": "World engine is running", "ticks": 4500, "session_id": "...", "agents": 4 }
+```
 
-**Resposta:**
+### `GET /system/info`
+Versão e status de todos os módulos ativos.
 ```json
 {
-    "status": "World engine is running",
-    "ticks": 1234
+  "version": "turbinada-v0.5",
+  "ticks": 4500,
+  "session_id": "e3b...",
+  "modules": {
+    "thinker": true, "tournament_runner": true,
+    "memory_store": true, "webhook_manager": true,
+    "replay_store": true, "decision_log": true
+  },
+  "rate_limit": true,
+  "active_tournaments": 0,
+  "agents_with_memory": 0
 }
 ```
 
-**Observação:** este endpoint é apenas um heartbeat da engine. O estado completo do mundo é entregue pelo WebSocket `/ws`.
+### `GET /rate-limit/status`
+Status e regras do rate limiting (slowapi).
 
 ---
 
-### `POST /reset` 🔒 (Admin)
-Reinicia o jogo. Requer `X-Admin-Token`.
+## 🤖 Perfis de IA
 
-**Query params:**
-| Param | Tipo | Default | Descrição |
-|-------|------|---------|-----------|
-| `player_count` | `int` | `4` | Número de NPCs |
-
-**Resposta:**
+### `GET /profiles`
+Lista os 6 perfis de IA disponíveis.
 ```json
 {
-    "status": "World reset successful",
-    "player_count": 4
+  "profiles": [
+    { "profile_id": "gemini-native", "provider": "gemini", "model": "gemini-2.5-flash-lite", "token_budget": 10000, "cooldown_ticks": 3 },
+    { "profile_id": "cheap-fast",    "provider": "omnirouter", "model": "gemini/gemini-2.5-flash-lite", "token_budget": 5000, "cooldown_ticks": 2 },
+    { "profile_id": "balanced",      "provider": "omnirouter", "model": "gemini/gemini-2.5-flash", "token_budget": 8000, "cooldown_ticks": 3 },
+    { "profile_id": "smart",         "provider": "omnirouter", "model": "openai/gpt-4o-mini", "token_budget": 6000, "cooldown_ticks": 4 },
+    { "profile_id": "oss-fast",      "provider": "omnirouter", "model": "meta/llama-3.3-70b", "token_budget": 8000, "cooldown_ticks": 3 },
+    { "profile_id": "creative",      "provider": "omnirouter", "model": "anthropic/claude-3-haiku", "token_budget": 7000, "cooldown_ticks": 4 }
+  ]
 }
 ```
 
-**Observação:** no estado atual do código, o squad inicial padrão cobre até 4 agentes base (`João`, `Maria`, `Zeca`, `Elly`).
-
 ---
 
-### `POST /settings/ai_interval` 🔒 (Admin)
-Define o intervalo de decisão da IA (em ticks).
+## 🧾 Registro de Agentes
 
-**Query params:**
-| Param | Tipo | Descrição |
-|-------|------|-----------|
-| `interval` | `int` | `0` = modo paralelo (todos pensam a cada tick). `N` = turnos, um por vez a cada N ticks |
-
-**Resposta:**
-```json
-{
-    "status": "Interval updated",
-    "new_interval": 5
-}
-```
-
-**Observação:** `interval=0` é o modo mais caro, porque permite pensar em paralelo sempre que um agente estiver elegível.
-
----
-
-### `POST /join`
-Entrada de um agente remoto (controlado externamente) na ilha.
-
-**Requer:** `agent_id` deve estar na lista `AUTHORIZED_IDS` do `.env`.
+### `POST /agents/register`
+Registra um agente externo com perfil de IA.
 
 **Body:**
 ```json
 {
-    "agent_id": "777",
-    "name": "MeuAgente",
-    "personality": "Curioso e estratégico. Gosta de explorar o mapa."
+  "owner_id": "seu-id",
+  "owner_name": "Nome Opcional",
+  "agent_name": "MeuBot",
+  "persona": "Estratégico e adaptável",
+  "profile_id": "balanced"
 }
 ```
-
 **Resposta:**
 ```json
 {
-    "status": "Joined successfully",
-    "agent_id": "777",
-    "name": "MeuAgente",
-    "personality": "Curioso e estratégico...",
-    "coords": [10, 10]
+  "agent_id": "agent_seu-id_1773511490",
+  "message": "MeuBot entrou na ilha!",
+  "profile": "balanced",
+  "model": "gemini/gemini-2.5-flash",
+  "token_budget": 8000
 }
 ```
 
-**Erros:**
-- `401`: `agent_id` não autorizado
-- `400`: `agent_id` já está em uso por agente vivo
-
----
+### `GET /agents/{agent_id}/state`
+Estado completo do agente com memória, benchmark e dados de perfil.
+```json
+{
+  "id": "...", "name": "MeuBot", "profile_id": "balanced",
+  "hp": 85, "hunger": 60, "thirst": 70,
+  "tokens_used": 1200, "token_budget": 8000,
+  "benchmark": { "score": 12.5, "decisions_made": 45, "cost_usd": 0.002 },
+  "memory": { "short_term": [...], "episodic": [...], "relational": {...} }
+}
+```
 
 ### `GET /agent/{agent_id}/context`
-Retorna o contexto atual do agente remoto (o que ele vê, status de vitals, inventário).
-
-**Resposta:**
-```json
-{
-    "time": 450,
-    "is_night": false,
-    "visible_entities": [...],
-    "reachable_now": ["ÁRVORE COM FRUTO em 5,3"],
-    "can_gather_now": true,
-    "can_drink_now": false,
-    "inventory": ["fruit"],
-    "is_moving_automatically_to": null,
-    "is_carrying_body": false,
-    "carrying_name": null,
-    "status": {
-        "hp": 85,
-        "hunger": 60,
-        "thirst": 45,
-        "is_alive": true,
-        "is_zombie": false,
-        "inventory": ["fruit"],
-        "pos": [5, 4]
-    }
-}
-```
-
-**Observação:** `visible_entities` usa o recorte perceptivo atual do motor; não é o estado total do mapa.
-
----
+Contexto perceptivo do agente (o que ele vê, pode alcançar, inventário).
 
 ### `POST /agent/{agent_id}/action`
-Agente remoto envia uma ação para execução imediata.
+Envia ação manual para o agente remoto.
 
 **Body:**
 ```json
 {
-    "thought": "Preciso comer antes de escurecer",
-    "action": "eat",
-    "speak": "Ótimo, finalmente uma maçã!",
-    "target_name": "",
-    "params": {}
+  "thought": "Vou comer",
+  "action": "eat",
+  "speak": "Que maçã!",
+  "target_name": "",
+  "params": {}
 }
 ```
+**Ações válidas:** `move`, `move_to`, `attack`, `speak`, `wait`, `eat`, `drink`, `gather`, `fill_bottle`, `pickup_body`, `bury`
 
-**Ações disponíveis:** `move`, `move_to`, `gather`, `eat`, `fill_bottle`, `drink`, `speak`, `wait`, `pickup_body`, `bury`, `attack`
-
-**Params por ação:**
-| Ação | Params |
-|------|--------|
-| `move` | `{"dx": -1, "dy": 0}` (valores: -1, 0 ou 1) |
-| `move_to` | `{"target_x": 15, "target_y": 5}` |
-| `attack` | Body: `"target_name": "João"` |
-
-**Resposta:**
-```json
-{
-    "status": "Action processed",
-    "action": "eat"
-}
-```
+### `DELETE /agent/{agent_id}` 🔒
+Remove um agente da ilha. Requer `X-Admin-Token`.
 
 ---
 
-### `DELETE /agent/{agent_id}` 🔒 (Admin)
-Remove um agente da ilha.
+## 📊 Scoreboard & Sessões
 
-**Resposta:**
+### `GET /world/scoreboard`
+Placar global multi-sessão do SQLite.
+
+### `GET /world/scoreboard/export?format=csv|json`
+Exporta o scoreboard. `format=csv` retorna arquivo CSV para download.
+
+### `GET /sessions`
+Lista histórico de sessões.
 ```json
-{
-    "status": "Agent removed",
-    "agent_id": "777"
-}
+{ "sessions": [{ "id": "...", "started_at": 1.7e9, "status": "active", "winner_model": null }] }
 ```
 
-**Observação importante:** a documentação trata esta rota como administrativa, mas o código atual ainda não valida `X-Admin-Token` nela. Esse ajuste é simples e já está mapeado no plano de melhorias.
+### `GET /sessions/{session_id}/replay`
+Todos os frames de replay da sessão (snapshots a cada 5 ticks).
+
+### `GET /sessions/{session_id}/export?format=csv|json`
+Exporta frames de replay.
+
+### `GET /sessions/{session_id}/decisions/export?format=csv|json`
+Exporta o decision log NDJSON como CSV ou JSON.
 
 ---
 
-## WebSocket `/ws`
+## 🏆 Torneios
+
+### `POST /tournaments` 🔒
+Cria um torneio.
+
+**Body:**
+```json
+{ "name": "Torneio IA", "max_agents": 8, "duration_ticks": 500, "allowed_profiles": [], "reset_on_finish": true }
+```
+
+### `POST /tournaments/{id}/join`
+Agente entra em um torneio.
+
+### `POST /tournaments/{id}/start` 🔒
+Inicia o torneio.
+
+### `GET /tournaments/{id}/status`
+Status detalhado com progresso percentual e ticks restantes.
+```json
+{
+  "id": "tournament_...", "status": "active",
+  "current_tick": 250, "start_tick": 100, "ticks_remaining": 350,
+  "progress_pct": 30.0, "registered_agents": 4, "winner": null
+}
+```
+
+### `GET /tournaments/{id}/leaderboard`
+Leaderboard ao vivo (se ativo) ou final (se encerrado).
+
+### `GET /tournaments`
+Lista todos os torneios.
+
+---
+
+## 🧠 Memória Persistente
+
+### `GET /memories?owner_id=<optional>`
+Lista agentes com memória salva no SQLite.
+
+### `POST /memories/save/{agent_id}`
+Salva manualmente a memória de um agente (requer `owner_id` no agente).
+
+### `DELETE /memories/{owner_id}/{agent_name}` 🔒
+Remove memória de um agente.
+
+---
+
+## 🔔 Webhooks
+
+### `POST /webhooks/register`
+Registra webhook para eventos de notificação.
+
+**Body:**
+```json
+{
+  "owner_id": "meu-id",
+  "url": "https://meuservidor.com/webhook",
+  "events": ["death", "win", "zombie"],
+  "secret": "chave-hmac-opcional"
+}
+```
+**Eventos válidos:** `death`, `win`, `zombie`, `tournament_end`, `agent_registered`, `all`
+
+**Assinatura HMAC (se secret configurado):**
+```
+X-BBBia-Signature: sha256=<hash>
+```
+
+### `GET /webhooks/{owner_id}`
+Lista webhooks de um owner.
+
+### `DELETE /webhooks/{webhook_id}?owner_id=...`
+Remove um webhook.
+
+### `POST /webhooks/test/{owner_id}` 🔒
+Dispara evento de teste para os webhooks do owner.
+
+---
+
+## 🎮 Agentes Remotos Legados
+
+### `POST /join`
+Entrada de agente remoto com ID autorizado.
+
+**Body:** `{ "agent_id": "777", "name": "MeuBot", "personality": "Curioso" }`
+
+> ⚠️ O `agent_id` deve estar em `AUTHORIZED_IDS` no `.env`.
+
+---
+
+## 🔧 Configurações
+
+### `POST /reset` 🔒
+Reinicia o jogo. Query param: `?player_count=4`
+
+### `POST /settings/ai_interval` 🔒
+Define o intervalo de decisão. Query param: `?interval=5`
+
+---
+
+## 📡 WebSocket `/ws`
 
 ### Conectar
 ```javascript
-const ws = new WebSocket("ws://localhost:8000/ws");
+const ws = new WebSocket("ws://localhost:8001/ws");
 ```
 
-### Mensagens recebidas (servidor → cliente)
-
-#### `init` — Estado inicial ao conectar
+### Mensagem `update` (servidor → cliente)
 ```json
 {
-    "type": "init",
-    "data": { /* world state */ }
-}
-```
-
-#### `update` — Atualização a cada tick (~1s)
-```json
-{
-    "type": "update",
-    "data": { /* world state */ },
-    "events": [
-        {
-            "agent_id": "uuid",
-            "name": "João",
-            "action": "eat",
-            "speak": "Que maçã deliciosa!",
-            "target_name": "",
-            "event_msg": "comeu a fruta! Fome: 95/100",
-            "thought": "Estava com muita fome"
-        }
-    ]
-}
-```
-
-#### `reset` — Jogo reiniciado
-```json
-{
-    "type": "reset",
-    "data": { /* world state */ }
-}
-```
-
-### World State Schema
-```json
-{
-    "ticks": 1234,
-    "game_over": false,
-    "winner": null,
-    "winner_id": null,
-    "day_cycle": 45,
-    "is_night": false,
-    "ai_interval": 5,
-    "player_count": 4,
-    "next_agent": "João",
-    "ticks_to_next_turn": 3,
-    "reset_countdown": null,
-    "scores": { "João": 2, "Maria": 1 },
-    "hall_of_fame": [
-        {
-            "name": "Maria",
-            "apples": 12,
-            "water": 8,
-            "chats": 45,
-            "tick": 320,
-            "score": 65
-        }
-    ],
-    "entities": {
-        "agent_uuid": {
-            "type": "agent",
-            "x": 5,
-            "y": 3,
-            "name": "João",
-            "hp": 85,
-            "hunger": 70,
-            "thirst": 55,
-            "friendship": 60,
-            "is_alive": true,
-            "is_zombie": false,
-            "inventory": ["fruit"],
-            "held_item": null,
-            "apples_eaten": 3,
-            "water_drunk": 2,
-            "chats_sent": 15
-        },
-        "tree_5_3": {
-            "type": "tree",
-            "x": 5,
-            "y": 3,
-            "fruit_stage": 3
-        },
-        "water_10_10": {
-            "type": "water",
-            "x": 10,
-            "y": 10
-        }
+  "type": "update",
+  "data": { /* WorldState completo */ },
+  "events": [
+    {
+      "agent_id": "uuid", "name": "João",
+      "action": "eat", "speak": "Que maçã!",
+      "event_msg": "comeu a fruta!", "thought": "Estava com fome"
     }
+  ]
 }
 ```
 
-**Observação:** no estado serializado atual, `winner_id` é o campo efetivamente usado. `winner` aparece apenas como referência conceitual na documentação/schema.
-
-### Tipos de Entidade
-| Tipo | Descrição |
-|------|-----------|
-| `agent` | NPC ou jogador remoto |
-| `tree` | Árvore com fruta (fruit_stage: 1-3) |
-| `water` | Tile de lago |
-| `stone` | Pedra (obstáculo) |
-| `house` | Casa (abrigo do agente) |
-| `cemetery` | Área do cemitério |
-| `dead_agent` | Túmulo (após enterro) |
-| `dropped_fruit` | Fruta no chão |
+### WorldState Schema (simplificado)
+```json
+{
+  "ticks": 1234, "is_night": false, "game_over": false,
+  "winner": null, "winner_id": null,
+  "entities": {
+    "agent-uuid": { "type": "agent", "x": 5, "y": 3, "name": "João", "hp": 85, "is_alive": true, "is_zombie": false, "profile_id": "balanced", "tokens_used": 1200 },
+    "tree_5_3":   { "type": "tree", "x": 5, "y": 3, "fruit_stage": 3 }
+  }
+}
+```
 
 ---
 
-## Fluxo de Integração (Agente Remoto)
-
-```
-1. POST /join  →  Receber agent_id confirmado
-2. Loop:
-   a. GET /agent/{id}/context  →  Obter estado atual
-   b. Processar com sua IA/lógica
-   c. POST /agent/{id}/action  →  Enviar decisão
-   d. Aguardar N segundos
-3. Observar via WebSocket /ws para ver todos os eventos
-```
-
-**Dica prática:** se o seu agente usar LLM externo, vale respeitar o `ai_interval` do servidor e aplicar um pequeno cooldown local para evitar spam de decisões.
-
----
-
-## Configuração `.env`
+## 🔧 `.env` Completo
 
 ```env
 GEMINI_API_KEY=sua_chave_aqui
 ADMIN_TOKEN=token_secreto_admin
 AUTHORIZED_IDS=777,888,999
-ALLOWED_ORIGINS=http://localhost:3000,http://meusite.com
+ALLOWED_ORIGINS=http://localhost:3000,null
+OMNIROUTER_URL=http://192.168.0.15:20128
 ```

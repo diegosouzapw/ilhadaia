@@ -22,7 +22,7 @@ class AIResponse:
 
     @property
     def total_tokens(self) -> int:
-        return self.prompt_tokens + self.completion_tokens
+        return int(self.prompt_tokens or 0) + int(self.completion_tokens or 0)
 
 
 class AIAdapter(ABC):
@@ -62,7 +62,7 @@ class AIAdapter(ABC):
             action_params=params if isinstance(params, dict) else {},
             intent=str(data.get("intent", "survive")),
             target_name=str(data.get("target_name", "")),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
+            prompt_tokens=int(prompt_tokens or 0),
+            completion_tokens=int(completion_tokens or 0),
             latency_ms=latency,
         )

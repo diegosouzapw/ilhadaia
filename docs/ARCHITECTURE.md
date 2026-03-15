@@ -1,234 +1,181 @@
-# 🏗️ Arquitetura do Sistema — BBBia: A Ilha da IA
+# 🏗️ Arquitetura — BBBia Versão Turbinada v0.5
 
-> **Versão documentada:** v1.0 (estado atual do protótipo)  
-> **Última atualização:** Março 2026
+> Estado: **Produção** (março 2026) | Backend: FastAPI 0.115 | Python 3.12
 
 ---
 
 ## Visão Geral
 
-O BBBia é uma simulação de sobrevivência social onde agentes de IA competem em uma ilha virtual. A arquitetura é **monolítica simples**, ideal para prototipagem rápida, com um backend Python e um frontend estático 3D.
-
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FRONTEND (Browser)                       │
-│                                                                 │
-│   index.html + main.js (Three.js 3D) + style.css               │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │  Observer 3D View  │  Chat Panel  │  Agent Stats Panel  │   │
-│   └─────────────────────────────────────────────────────────┘   │
-│             │ WebSocket (ws://localhost:8000/ws)                 │
-│             │ HTTP REST (http://localhost:8000/...)              │
-└─────────────┼───────────────────────────────────────────────────┘
-              │
-┌─────────────▼───────────────────────────────────────────────────┐
-│                        BACKEND (Python/FastAPI)                  │
-│                                                                  │
-│  main.py (FastAPI App)                                           │
-│  ┌─────────────────┐  ┌──────────────────────────────────────┐  │
-│  │  ConnectionMgr   │  │            World Loop (asyncio)       │  │
-│  │  (WebSocket Hub) │  │    tick() every 1s → broadcast WS    │  │
-│  └─────────────────┘  └──────────────────────────────────────┘  │
-│                                                                  │
-│  world.py (World)                                                │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Estado: entities dict, agents list, ticks, game_over    │   │
-│  │  Lógica: BFS pathfinding, vitals, day/night, zombies     │   │
-│  │  Persistência: hall_of_fame.json, world_settings.json    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  agent.py (Agent)                                                │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Vitals: hp, hunger, thirst, friendship                  │   │
-│  │  Memory: lista simples (max 10 thoughts)                 │   │
-│  │  AI: Google Gemini API (hardcoded)                       │   │
-│  │  act() → prompt → Gemini → JSON action                   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│              │                                                   │
-│              ▼                                                   │
-│  ┌──────────────────────┐                                        │
-│  │   Google Gemini API   │  (google-genai SDK)                   │
-│  │   gemini-2.5-flash-  │                                        │
-│  │   lite               │                                        │
-│  └──────────────────────┘                                        │
-└──────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Componentes
-
-### 1. `backend/main.py` — FastAPI Application
-
-**Responsabilidades:**
-- Inicializa a aplicação FastAPI
-- Gerencia conexões WebSocket via `ConnectionManager`
-- Inicia o `world_loop()` como background task via `asyncio`
-- Expõe endpoints REST para administração e agentes remotos
-
-**Endpoints:**
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| `GET` | `/` | Status da engine |
-| `WS` | `/ws` | Stream de atualizações para o observer |
-| `POST` | `/reset` | Reset do jogo (admin) |
-| `POST` | `/settings/ai_interval` | Ajusta intervalo de IA (admin) |
-| `POST` | `/join` | Agente remoto entra na ilha |
-| `GET` | `/agent/{id}/context` | Contexto do agente remoto |
-| `POST` | `/agent/{id}/action` | Agente remoto executa ação |
-| `DELETE` | `/agent/{id}` | Remove agente (admin) |
-
-**Limitações conhecidas:**
-- Single worker: `ConnectionManager` usa lista em memória, não funciona com múltiplos processos.
-- `world_loop()` roda em único asyncio event loop.
-- A rota `DELETE /agent/{id}` ainda não valida `X-Admin-Token` no código atual, embora a intenção da API/documentação seja tratá-la como rota administrativa.
-
----
-
-### 2. `backend/world.py` — Motor de Simulação
-
-**Responsabilidades:**
-- Gerencia estado global (20x20 grid, entities, agents)
-- Tick a cada 1 segundo: vitals, day/night, zombies, AI dispatch
-- BFS pathfinding para movimento
-
-**Estado interno:**
-```python
-World {
-    size: 20                     # Grid 20x20
-    ticks: int                   # Contador de tempo
-    entities: Dict[str, Any]     # Mapa de id → entidade (items, agentes, estruturas)
-    agents: List[Agent]          # Agentes ativos
-    scores: Dict[str, Any]       # Pontuações históricas
-    hall_of_fame: List[Dict]     # Top 3 registros
-    ai_events: List[Dict]        # Fila de eventos de IA (background tasks)
-    thinking_agents: Set[str]    # Agentes aguardando resposta da IA
-}
-```
-
-**Ciclo de Tick:**
-1. Spawn de agentes pendentes
-2. Ciclo dia/noite: zombie conversion, sunlight disintegration
-3. Vitals: fome, sede, HP, amizade (decay/recovery)
-4. Verificação de morte e game over
-5. Movimento automático (BFS path resolution)
-6. Auto-interações por proximidade (coleta, água, corpo, enterro)
-7. Dispatch de AI decisions (background tasks via `asyncio.create_task`)
-8. Coleta de eventos de AI completados
-
-**Persistência:**
-- `hall_of_fame.json`: Histórico de recordes top 3
-- `world_settings.json`: `ai_interval`, `player_count`
-
-**Pontos de melhoria já identificados:**
-- Extrair regras determinísticas para facilitar testes
-- Substituir score simplificado por scoreboard persistente por agente/modelo
-- Adicionar snapshots/replay sem transformar o `World` em serviço separado cedo demais
-
----
-
-### 3. `backend/agent.py` — Agente de IA
-
-**Responsabilidades:**
-- Representa um NPC ou agente remoto
-- Chama Google Gemini via `google-genai` SDK
-- Retorna JSON de ação estruturada
-
-**Fluxo de decisão:**
-```
-World.tick()
-  └─► asyncio.create_task(_run_agent_ai_task(agent, context))
-           └─► agent.act(context)
-                    └─► Build prompt (status + visible entities)
-                    └─► Gemini API call (application/json response)
-                    └─► Parse JSON → action dict
-                    └─► Return to world (via ai_events queue)
-```
-
-**Ações disponíveis:**
-| Ação | Descrição |
-|------|-----------|
-| `move` | Move 1 tile (dx, dy) |
-| `move_to` | Define destino (pathfinding automático) |
-| `gather` | Colhe fruta de árvore próxima |
-| `eat` | Consome fruta do inventário |
-| `fill_bottle` | Enche garrafa d'água no lago |
-| `drink` | Bebe água da garrafa |
-| `speak` | Fala algo (bubble chat) |
-| `wait` | Não faz nada |
-| `pickup_body` | Pega corpo morto |
-| `bury` | Enterra corpo no cemitério |
-| `attack` | Ataque de zumbi |
-
-**Memória:** Lista simples de últimos 10 thoughts. **Não persiste entre sessões.**
-
-**Observações técnicas adicionais:**
-- O parsing do JSON ainda é manual. Structured output com schema tipado é uma melhoria prioritária.
-- O provider está acoplado ao próprio `Agent`; benchmark multi-provider exige adapter separado.
-
----
-
-### 4. `frontend/` — Observer 3D
-
-**Tecnologias:**
-- **Three.js** (via CDN) — motor 3D WebGL
-- **Vanilla JavaScript** — lógica de estado e UI
-- **Vanilla CSS** — estilização
-
-**Componentes visuais:**
-- Grid 3D 20x20 tiles (ilha)
-- Agentes com animação de caminhada (Minecraft-style)
-- Bolhas de chat HTML sobre agentes (CSS overlay)
-- Labels de nome (CSS overlay)
-- Cone de visão do agente (Three.js mesh)
-- HUD: stats, hall of fame, clock, controles admin
-
-**Detalhes adicionais relevantes:**
-- Usa `localStorage` para histórico de chat, volume e `adminToken`
-- Reaproveita o mesmo stream WebSocket para render, eventos e HUD
-- Já funciona bem como cockpit de debug para replay/benchmark futuro
-
----
-
-## Fluxo de Dados
-
-```
-[World Tick Loop]
-    │
-    ├─► Atualiza estado (vitals, movement, zombies)
-    │
-    ├─► asyncio.create_task(agent.act()) ←── Gemini API
-    │
-    └─► broadcast WebSocket → {"type": "update", "data": world_state, "events": [...]}
-                                │
-                            [Frontend]
-                                │
-                                ├─► updateWorld(data) → atualiza meshes 3D
-                                └─► handleEvents(events) → bubbles, sounds, UI
+┌─────────────────────────────────────────────────────────────────────┐
+│                        FRONTEND (Browser)                           │
+│   index.html           dashboard.html                               │
+│   ├── Three.js 3D      ├── Chart.js                                 │
+│   ├── main.js          ├── KPIs ao vivo                             │
+│   ├── benchmark.js     ├── Scoreboard + Gráficos                    │
+│   └── WebSocket WS     └── Export CSV/JSON                          │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │ HTTP REST + WebSocket /ws
+┌─────────────────────────────▼───────────────────────────────────────┐
+│                     BACKEND (FastAPI + asyncio)                     │
+│                      Porta 8001 | Single Worker                     │
+│                                                                      │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
+│  │   World     │  │   Thinker    │  │   TournamentRunner       │  │
+│  │  (Motor)    │  │ (Orquestrador│  │  (auto-lifecycle)        │  │
+│  │  20×20 grid │  │  de decisões)│  │  leaderboard + finalize  │  │
+│  └──────┬──────┘  └──────┬───────┘  └──────────────────────────┘  │
+│         │                │                                           │
+│  ┌──────▼──────────────────▼────────────────────────────────────┐  │
+│  │                    Agent                                      │  │
+│  │  vitals   inventory   can_think()   token_budget              │  │
+│  │  AgentMemory: short_term + episodic + relational + benchmark  │  │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│  ┌──────────────┐  ┌────────────────────────────────────────────┐  │
+│  │   Profiles   │  │         AI Adapters                        │  │
+│  │ 6 perfis IA  │  │  GeminiAdapter  OpenAICompatibleAdapter     │  │
+│  └──────────────┘  └────────────────┬───────────────────────────┘  │
+│                                     │                                │
+└─────────────────────────────────────┼────────────────────────────── ┘
+                                      │ HTTPS
+┌─────────────────────────────────────▼───────────────────────────────┐
+│                        PROVIDERS DE IA                               │
+│  Google Gemini API           OmniRouter (http://localhost:20128)    │
+│  gemini-2.5-flash-lite       → Gemini, GPT-4o-mini, Llama, Claude  │
+└──────────────────────────────────────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────────────┐
+│                       STORAGE (SQLite WAL)                          │
+│  ilhadaia.db                                                         │
+│  ├── sessions          (criação, encerramento, winner)              │
+│  ├── agent_scores      (scoreboard multi-sessão)                    │
+│  ├── world_settings_history                                          │
+│  ├── agent_memories    (memória persistente entre sessões)          │
+│  └── webhooks          (URLs + eventos + HMAC secret)               │
+│                                                                      │
+│  logs/*.ndjson         (decision log por sessão)                    │
+│  data/replays/*.ndjson (snapshots a cada 5 ticks)                   │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Limitações Atuais (v1.0)
+## Módulos do Backend
 
-| Limitação | Impacto |
-|-----------|---------|
-| Gemini hardcoded | Sem benchmark multi-provider |
-| Memória = lista 10 items | Sem histórico real, sem persistência |
-| WebSocket single-worker | Não escala horizontalmente |
-| Sem logging estruturado | Difícil análise pós-jogo |
-| Sem replay/gravação | Cada sessão se perde |
-| Sem scoreboard persistente por modelo | Não é um benchmark real |
-| Sem budget de tokens por agente | Custo pode escalar |
-| Sem rate limiting no AI dispatch | Risco de spam de API |
-| `DELETE /agent/{id}` sem proteção real no código | Brecha administrativa simples de corrigir |
+### `world.py` — Motor de Simulação
+- Grid 20×20 com BFS pathfinding
+- Ciclo dia/noite, zumbis, desintegração solar
+- Distribuição de turnos por `ai_interval`
+- Broadcast de eventos via WebSocket
+
+### `agent.py` — Agente IA
+- Vitals: hp, hunger, thirst, friendship
+- Budget: `token_budget`, `tokens_used`, `cooldown_ticks`, `can_think()`
+- Memória: `AgentMemory` (4 camadas, T10)
+- Benchmark: score, decisions_made, cost_usd, invalid_actions
+
+### `runtime/thinker.py` — Orquestrador
+1. Verifica `can_think()` (budget + cooldown)
+2. Constrói contexto (world state + memória relevante via T21)
+3. Chama adapter (Gemini ou OmniRouter)
+4. Valida resposta com `ActionDecision` (T11)
+5. Atualiza memória e benchmark
+6. Loga decisão em NDJSON (T03)
+
+### `runtime/memory.py` — AgentMemory (T10)
+| Camada | Tipo | Limite |
+|--------|------|--------|
+| `short_term` | Ações recentes | deque max 10 |
+| `episodic` | Eventos marcantes (morte, ataque, aliança) | max 50 |
+| `relational` | Opiniões sobre outros agentes (-1..+1) | sem limite |
+| `benchmark` | Métricas de performance | dict herdado do Agent |
+
+### `runtime/relevance.py` — Busca Episódica (T21)
+- TF-IDF simplificado + pesos por tipo de evento
+- Decaimento temporal exponencial (`exp(-rate * ticks_ago)`)
+- Retorna top-K episódios mais relevantes para o contexto atual
+- Sem dependências externas (sem ChromaDB)
+
+### `runtime/tournament_runner.py` — TournamentRunner (T20)
+- Loop assíncrono que verifica todos os torneios ativos a cada 10s
+- Finaliza automaticamente quando `duration_ticks` é atingido
+- Calcula leaderboard final (score + alive + decisions)
+- Suporte a `reset_on_finish`
+
+### `storage/` — Persistência
+| Módulo | Tecnologia | O que armazena |
+|--------|-----------|----------------|
+| `session_store.py` | SQLite WAL | sessões, scores, world_settings |
+| `decision_log.py` | NDJSON | decisões de IA por sessão |
+| `replay_store.py` | NDJSON | snapshots por tick (a cada 5) |
+| `memory_store.py` | SQLite WAL | AgentMemory serializada por owner |
+| `webhook_manager.py` | SQLite WAL | URLs, eventos, fire_count |
 
 ---
 
-## Próximos Passos de Arquitetura (sem trocar a stack)
+## Fluxo de uma Decisão de IA
 
-1. Extrair adapter de IA (`GeminiAdapter`, `OmniRouterAdapter`, etc.)
-2. Adicionar budget/cooldown por agente
-3. Registrar decision logs e snapshots de replay
-4. Substituir score em JSON por scoreboard persistente leve (SQLite)
-5. Modularizar backend em passos pequenos, sem reescrever o protótipo
+```
+tick N
+  └─ World seleciona agente (por ai_interval ou paralelo)
+      └─ agent.can_think()? (budget + cooldown)
+          └─ Thinker.think(agent, world_context)
+              ├─ Relevance.get_relevant(episodes, context, tick)
+              ├─ SchemaPrompt = ActionDecision.get_json_schema_prompt()
+              ├─ Adapter.complete(messages) → raw_response
+              ├─ ActionDecision.from_dict(parsed_json) → validação Pydantic
+              ├─ agent.agent_memory.add_short_term(action, thought, result)
+              ├─ agent.update_benchmark(tokens, cost, latency)
+              └─ DecisionLog.log(session, agent, action, tokens)
+```
+
+---
+
+## Rate Limiting (T18)
+
+Implementado via `slowapi` com chave por IP:
+
+| Endpoint | Limite |
+|----------|--------|
+| `POST /agents/register` | 10 req/min |
+| `POST /tournaments` | 5 req/min |
+| `POST /webhooks/register` | 20 req/hora |
+
+---
+
+## Sistema de Webhooks (T24)
+
+```
+Evento (death/win/zombie/tournament_end)
+  └─ WebhookManager.fire_event(event_type, payload)
+      └─ Para cada webhook registrado que escuta esse evento:
+          ├─ Monta body JSON: { event, timestamp, payload }
+          ├─ Assina com HMAC-SHA256 se secret configurado
+          └─ POST async (httpx, timeout=5s)
+```
+
+---
+
+## Limitações Conhecidas
+
+| Limitação | Status | Plano |
+|-----------|--------|-------|
+| Single worker (não escala horizontalmente) | Ativo | T17 (Redis pub/sub — Backlog) |
+| Frontend via `file://` tem CORS `null` habilitado | Ativo, controlado | Produção via nginx |
+| SQLite não é adequado para >1000 writes/seg | Não é o caso | Usar WAL, ok para escala atual |
+
+---
+
+## Dependências
+
+```
+fastapi, uvicorn          # Framework web + ASGI
+pydantic                  # Validação de schemas
+python-dotenv             # Config por env
+google-genai              # Adapter Gemini nativo
+openai                    # Adapter OmniRouter/OpenAI-compat
+slowapi                   # Rate limiting
+httpx                     # HTTP async para webhooks
+pytest                    # Testes unitários (31 casos)
+```

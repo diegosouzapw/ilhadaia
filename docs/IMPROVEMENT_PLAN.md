@@ -1,500 +1,151 @@
-# 🚀 Plano de Melhorias — BBBia: A Ilha da IA (Versão Turbinada)
+# 🗒️ Plano de Implementação — BBBia Versão Turbinada
 
-> **Documento:** Análise completa de viabilidade + roadmap de implementação  
-> **Baseado em:** Conversa ChatGPT "Desenvolvimento de Mundo Roblox" (46 páginas)  
-> **Data:** Março 2026  
-> **Arquitetura alvo:** Manter Python/FastAPI/Three.js. **SEM migração para Roblox.**
+> Atualizado: Março 2026 | Versão: v0.5 | Status: **T17 no backlog, T01–T16 + T18–T24 implementadas**
 
 ---
 
-## 📋 Resumo Executivo
+## Resumo do Roadmap
 
-O protótipo atual prova que a ideia funciona: agentes de IA com personalidade, simulação de sobrevivência, zumbis, ciclo dia/noite. A conversa do ChatGPT revelou um roadmap ambicioso. 
-
-Após análise técnica completa do código atual e pesquisa de viabilidade, **15 das 16 ideias principais são implementáveis** na arquitetura atual sem mudança de tecnologia. Apenas a integração nativa com Roblox exige adaptação (mas o backend pode ser usado como endpoint para Roblox também).
-
-Além disso, o levantamento revelou **4 ajustes arquiteturais obrigatórios** para a próxima fase:
-- proteger corretamente rotas administrativas como `DELETE /agent/{id}`
-- substituir parsing manual por structured output/schema tipado quando possível
-- tirar score/replay do JSON solto e levar para persistência leve
-- manter o backend em single-worker até existir um backend de broadcast real para WebSocket
+| Versão | Foco | Tasks | Status |
+|--------|------|-------|--------|
+| v0.2 — Engine Confiável | Segurança, budget, storage | T01–T06 | ✅ 100% |
+| v0.3 — Multi-Provider Benchmark | Adapters, perfis, thinker, memória, schema, testes | T07–T12 | ✅ 100% |
+| v0.4 — Plataforma de Competição | Replay, registro, torneios, frontend | T13–T16 | ✅ 100% |
+| v0.5 — Escala & Intelligence | Rate limit, export, tournament runner, relevância, memória, dashboard, webhooks | T18–T24 | ✅ 100% |
+| Backlog | Redis pub/sub multi-worker | T17 | ⏳ Backlog |
 
 ---
 
-## ✅ O que PODE ser feito (na arquitetura atual)
+## v0.2 — Engine Confiável ✅
 
-### 🔴 Alta Prioridade — Quick Wins
+### T01 — Admin Token
+**Arquivo:** `backend/main.py`  
+Endpoint `DELETE /agent/{id}` protegido com `X-Admin-Token` via `Depends(verify_admin_token)`. Retorna 401 sem token.
 
-#### M01 — Adapter de IA Multi-Provider (OmniRouter)
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Médio
+### T02 — Budget & Cooldown
+**Arquivo:** `backend/agent.py`  
+Adicionados: `token_budget`, `tokens_used`, `cooldown_ticks`, `last_thought_tick`, `benchmark`, `can_think()`, `update_benchmark()`.
 
-**Problema atual:** `agent.py` usa `google-genai` hardcoded. Impossível trocar de modelo.
+### T03 — Decision Log
+**Arquivo:** `backend/storage/decision_log.py`  
+Log NDJSON por sessão. Cada linha: `{session_id, tick, agent_id, action, thought, tokens_used, cost_usd, latency_ms}`.
 
-**Solução:**
-- Criar `backend/ai_adapter.py` com interface abstrata `AIAdapter`
-- Implementar `GeminiAdapter`, `OmniRouterAdapter` (via HTTP)
-- Cada agente recebe um `model_profile` (YAML/dict)
-- Fallback automático por custo/erro
-- Usar structured output/schema tipado para reduzir fragilidade do parse
+### T04 — SQLite Scoreboard
+**Arquivo:** `backend/storage/session_store.py`  
+SQLite WAL com tabelas: `sessions`, `agent_scores`, `world_settings_history`. Métodos: `create_session`, `end_session`, `upsert_agent_score`, `get_scoreboard`.
 
-**Perfis por agente (como a conversa sugere):**
-```yaml
-profiles:
-  cheap-fast:
-    provider: openrouter
-    model: qwen/qwen-2.5-coder
-    max_tokens: 300
-  social-drama:
-    provider: omnirouter   # Seu OmniRoute!
-    model: claude-sonnet
-    max_tokens: 500
-  survivor-balanced:
-    provider: google
-    model: gemini-flash
-    max_tokens: 350
-```
+### T05 — Lifespan Migration
+**Arquivo:** `backend/main.py`  
+`@app.on_event` substituído por `@asynccontextmanager async def lifespan(app)`. Inclui startup e shutdown limpos.
 
-**Impacto:** Transforma a ilha em **benchmark de agentes** de verdade.
+### T06 — Docker
+**Arquivos:** `backend/Dockerfile`, `docker-compose.yml`, `.env.example`  
+Serviços: `backend` (FastAPI) + `nginx` (proxy reverso). Build multi-stage.
 
 ---
 
-#### M02 — Budget de Tokens e Rate Limiting por Agente
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Baixo
+## v0.3 — Multi-Provider Benchmark ✅
 
-**Problema atual:** Nenhum controle de custo. Um agente pode chamar a API a cada tick.
+### T07 — AI Adapters
+**Arquivos:** `backend/runtime/adapters/base.py`, `gemini.py`, `openai_compatible.py`  
+`AIAdapter` (abstract), `AIResponse` (dataclass), `GeminiAdapter` (google-genai SDK), `OpenAICompatibleAdapter` (openai SDK → OmniRouter).
 
-**Solução:**
-- Adicionar `token_budget: int` e `tokens_used: int` ao Agent
-- Limitar via configuração `max_tokens_per_tick`
-- Cooldown mínimo configurável por agente
-- Alertas quando budget > 80%
-- Telemetria: latência, custo estimado, tokens por decisão
-- Se alguns perfis permanecerem no ecossistema Gemini, avaliar **context caching** para prompts repetidos
+### T08 — Agent Profiles
+**Arquivo:** `backend/runtime/profiles.py`  
+6 perfis: `gemini-native`, `cheap-fast`, `balanced`, `smart`, `oss-fast`, `creative`. Configurados com `provider`, `model`, `token_budget`, `cooldown_ticks`, `max_tokens`.
 
----
+### T09 — Thinker
+**Arquivo:** `backend/runtime/thinker.py`  
+Orquestrador central: `can_think()` → montar contexto → chamar adapter → validar com ActionDecision → atualizar memória → logar decisão.
 
-#### M03 — Logging Estruturado de Decisões (Decision Log)
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Baixo
+### T10 — Memória 4 Camadas
+**Arquivo:** `backend/runtime/memory.py`  
+`AgentMemory` com `ShortTermEntry` (deque max 10), `EpisodicEntry` (max 50), `RelationalEntry` (opiniões -1..+1), benchmark herdado do Agent.
 
-**Problema atual:** Logs só no console/uvicorn. Sem análise pós-jogo.
+### T11 — Structured Output
+**Arquivo:** `backend/runtime/schemas.py`  
+`ActionDecision` Pydantic: validação de `action` (enum), `intent` (max 100 chars), alias `speech→speak`, `to_world_action()`, `from_dict()` seguro, `get_json_schema_prompt()`.
 
-**Solução:**
-- Criar `backend/decision_log.py` que salva NDJSON line-by-line
-- Logar por decisão: agent_id, tick, model, provider, profile, latency_ms, tokens, thought, action, result
-- Incluir `session_id` para correlação com replay e scoreboard
-- Endpoint `GET /logs/decisions?session_id=X` para download
-- Base para replay e benchmark
-
-**Formato:**
-```json
-{"tick": 450, "agent": "João", "model": "gemini-flash", "latency_ms": 342, "tokens": 287, "thought": "...", "action": "eat", "result": "success"}
-```
+### T12 — Testes Unitários
+**Arquivo:** `backend/tests/test_engine.py`  
+31 testes pytest: `TestActionDecision`, `TestAgentMemory`, `TestProfiles`, `TestAIResponse`, `TestDecisionLog`, `TestSessionStore`. **31/31 passing ✅**
 
 ---
 
-#### M04 — Sistema de Replay (Gravação + Reprodução)
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Médio
+## v0.4 — Plataforma de Competição ✅
 
-**Problema atual:** Cada sessão se perde. Impossível rever o que aconteceu.
+### T13 — Replay System
+**Arquivo:** `backend/storage/replay_store.py`  
+Snapshots NDJSON a cada 5 ticks por sessão. Métodos: `start_session`, `save_snapshot`, `load_session`, `get_frame`.
 
-**Solução:**
-- Salvar `world_state` snapshot a cada N ticks em arquivo NDJSON
-- Salvar também o log de eventos entre snapshots
-- Novo endpoint `GET /sessions` lista sessões gravadas
-- Novo endpoint `GET /sessions/{id}/replay` serve estado tick-a-tick
-- Frontend: botão "Assistir gravação" carrega replay
-- Sessão ativa: `session_id = timestamp_início`
+### T14 — Agent Registration
+**Endpoint:** `POST /agents/register`  
+Registro de agentes externos com `owner_id`, `agent_name`, `persona`, `profile_id`. Agente ativo na ilha automaticamente.
 
-**Impacto:** Permite compartilhar partidas, estudar comportamentos, criar "hall da fama" visual.
+### T15 — Tournament API
+**Endpoints:** `POST /tournaments`, `POST /tournaments/{id}/join`, `POST /tournaments/{id}/start`, `GET /tournaments/{id}/leaderboard`  
+Torneios em memória com registro de agentes e leaderboard ao vivo.
 
----
-
-#### M05 — Scoreboard Detalhado por Modelo/Agente
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Baixo
-
-**Problema atual:** Score simplificado (apples + water + chats). Scoreboard volátil.
-
-**Solução:**
-- Score multidimensional: sobrevivência (ticks), eficiência, social, enterros, recursos
-- Guardar `model_used` junto com o score
-- Endpoint `GET /worlds/{worldId}/scoreboard` retorna ranking por dimensão
-- Comparativo histórico por modelo de IA
-- SQLite (via `sqlite3` stdlib) — sem dependência extra
-- Preferir modo WAL para leitura concorrente leve
-
-**Schema SQLite proposto:**
-```sql
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    started_at INTEGER,
-    ended_at INTEGER,
-    player_count INTEGER
-);
-
-CREATE TABLE agent_scores (
-    session_id TEXT,
-    agent_name TEXT,
-    model_used TEXT,
-    ticks_survived INTEGER,
-    apples_eaten INTEGER,
-    water_drunk INTEGER,
-    chats_sent INTEGER,
-    burials_done INTEGER,
-    kills_as_zombie INTEGER,
-    final_hp INTEGER,
-    total_tokens INTEGER,
-    total_cost_usd REAL
-);
-```
+### T16 — Frontend Turbinado
+**Arquivos:** `frontend/index.html`, `frontend/benchmark.js`, `frontend/style.css`  
+HUD Benchmark (🏆), Painel de Replay (▶), Timeline de Eventos (📜), Modal de Agente Detalhado.
 
 ---
 
-### 🟡 Média Prioridade — Expansões Arquiteturais
+## v0.5 — Escala & Intelligence ✅
 
-#### M06 — Memória em 4 Camadas (Como o ChatGPT propôs)
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Alto
+### T18 — Rate Limiting
+**Arquivo:** `backend/main.py` (slowapi)  
+Rate limit por IP em endpoints públicos. `/agents/register`: 10/min, `/tournaments`: 5/min, `/webhooks/register`: 20/hora.
 
-**Problema atual:** `self.memory = []` com max 10 thoughts. Perde tudo ao reiniciar.
+### T19 — Exportação CSV/JSON
+**Endpoints:**
+- `GET /sessions/{id}/export?format=csv|json`
+- `GET /world/scoreboard/export?format=csv|json`
+- `GET /sessions/{id}/decisions/export?format=csv|json`
 
-**Proposta da conversa (implementável em Python puro):**
+`StreamingResponse` com `Content-Disposition` para download direto.
 
-| Camada | Tipo | Implementação |
-|--------|------|---------------|
-| `short_term` | Últimos eventos da sessão | Lista em memória (atual) |
-| `episodic` | Histórias compactadas por dia | dict comprimido no Agent |
-| `relational` | Relações (confiança, medo, amizade) | dict `{nome: score}` |
-| `benchmark_memory` | Telemetria de decisões | Decision Log (M03) |
+### T20 — Tournament Runner
+**Arquivo:** `backend/runtime/tournament_runner.py`  
+`TournamentRunner` com loop assíncrono de monitoramento. Finalização automática por `duration_ticks`. Leaderboard ao vivo e final. `GET /tournaments/{id}/status` com `progress_pct` e `ticks_remaining`.
 
-**Não precisamos de Vector DB para isso.** Um dict JSON é suficiente para o escopo atual.
+### T21 — Relevância Episódica
+**Arquivo:** `backend/runtime/relevance.py`  
+`EpisodicRelevanceEngine`: TF-IDF simplificado + pesos por tipo de evento (`death=3.0`, `attack=2.5`, `move=0.5`) + decaimento temporal exponencial. Sem ChromaDB.
 
-```python
-self.memory = {
-    "short_term": [],        # últimos 20 eventos
-    "episodic": {},          # {"dia_3": "Carla me salvou do zumbi"}
-    "relational": {          # {"Beto": {"trust": 0.8, "fear": 0.1}}
-        "João": {"trust": 0.5, "fear": 0.0, "debt": 0}
-    },
-    "benchmark": []          # telemetria bruta
-}
-```
+### T22 — Memória Persistente
+**Arquivo:** `backend/storage/memory_store.py`  
+`MemoryStore` salva/restaura `AgentMemory` (4 camadas) no SQLite entre sessões para agentes com `owner_id`. Endpoints: `GET /memories`, `POST /memories/save/{id}`.
 
----
+### T23 — Dashboard de Análise
+**Arquivo:** `frontend/dashboard.html`  
+Dashboard completo: KPIs ao vivo, Chart.js (tokens/scores), comparação de modelos por score médio, scoreboard global, histórico de sessões, seletor de sessão + export CSV.
 
-#### M07 — Separação simulation-core como Módulo
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Médio
-
-**Proposta da conversa:** Extrair `World` e estado dos agentes para módulo reutilizável.
-
-**Estrutura proposta:**
-```
-backend/
-├── simulation/
-│   ├── __init__.py
-│   ├── world.py          # Motor puro, sem FastAPI
-│   ├── agent.py          # Agente puro, sem Google GenAI hardcoded
-│   ├── rules.py          # Regras determinísticas isoladas
-│   └── serializer.py     # Serialização do estado
-├── ai/
-│   ├── __init__.py
-│   ├── base_adapter.py   # Interface abstrata
-│   ├── gemini_adapter.py
-│   └── omnirouter_adapter.py
-├── api/
-│   ├── __init__.py
-│   ├── main.py           # FastAPI app
-│   └── ws_manager.py     # WebSocket manager
-└── storage/
-    ├── __init__.py
-    ├── session_store.py  # SQLite session storage
-    └── replay_store.py   # Replay file storage
-```
-
-**Benefício:** Facilita testes unitários, benchmark isolado, e futura integração com Roblox (mesmo backend).
-
-**Nota prática:** a extração pode ser gradual, preservando `main.py` como bootstrap durante a transição.
+### T24 — Notificações Push
+**Arquivo:** `backend/storage/webhook_manager.py`  
+`WebhookManager` com registro de URLs por owner, filtragem por tipo de evento, disparo assíncrono com `httpx` e assinatura HMAC-SHA256. Endpoints: register, list, delete, test.
 
 ---
 
-#### M08 — Regras Determinísticas vs IA (Separação Clara)
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Baixo/Médio
+## Backlog
 
-**Problema atual:** Algumas validações de ação estão na IA (prompt), não no engine.
+### T17 — Redis WebSocket (pub/sub) — ⏳ Backlog
+**Arquivo planejado:** `backend/messaging/redis_pubsub.py`  
+Substituir broadcast em memória por Redis Pub/Sub para suportar múltiplos workers uvicorn. Requer instalação e configuração de Redis como serviço externo.
 
-**O que FICA determinístico (engine):**
-- Dano por frio (já é)
-- Morte por HP zero (já é)
-- Consumo de item (já é)
-- Inventário (já é)
-- Validação de movimento (já é parcialmente)
-- Zumbificação (já é)
-- Cálculo de score
-- **Cooldown de ação por agente** ← novo
-- **Limite de orçamento** ← novo (M02)
+**Dependências:** `redis`, `aioredis` | **Estimativa:** 2–3h | **Impacto:** Alto (necessário para escala horizontal)
 
-**O que FICA com IA:**
-- Fala/chat
-- Justificativa do pensamento
-- Escolha entre ações permitidas
-- Estratégia social
-- "Novela"
-
-**Criar `allowed_actions` context** mais rico, evitando que a IA tente ações inválidas.
+Ver [`BACKLOG.md`](./BACKLOG.md) para detalhes completos.
 
 ---
 
-#### M09 — Frontend Observer Turbinado
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Alto
-
-**O que adicionar:**
-
-1. **Painel por agente** — Clicar no agente abre modal com:
-   - Timeline de decisões desta sessão
-   - Grafo de relações (com quem falou, atacou, enterrou)
-   - Custo acumulado (tokens × preço do modelo)
-   - Memória atual (short_term + relational)
-
-2. **Timeline de eventos** — Linha do tempo lateral com todos os eventos filtráveis por tipo
-
-3. **HUD de benchmark** — Tabela comparativa de modelos ao vivo:
-   | Modelo | Agente | Ticks | Tokens | Custo | Score |
-   |--------|--------|-------|--------|-------|-------|
-
-4. **Controle de replay** — Slider de progresso, play/pause, velocidade
-
-5. **Painel técnico opcional** — latência média por modelo, agentes aguardando IA e budget restante
-
----
-
-#### M10 — Sistema de Agentes com Owner/Token
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Médio
-
-**Inspiração da conversa:** "cada pessoa aqui pode controlar um!"
-
-**Implementação atual vs proposta:**
-| Atual | Proposta |
-|-------|---------|
-| `AUTHORIZED_IDS` hardcoded no .env | Registro via endpoint |
-| Sem owner | `owner_id`, `owner_name` no agente |
-| Sem budget real | `token_budget` configurável por owner |
-| Sem múltiplos tokens | Geração de `agent_token` UUID |
-
-**Novo endpoint de registro:**
-```
-POST /agents/register
-{
-    "owner_name": "Diego",
-    "agent_name": "AlphaBot",
-    "personality": "Estratégico e frio",
-    "model_profile": "cheap-fast",
-    "token_budget": 10000
-}
-→ { "agent_token": "uuid", "agent_id": "uuid" }
-```
-
----
-
-#### M11 — API de Torneio/Campeonato
-**Status:** ✅ Viável | **Impacto:** 🔥🔥🔥 | **Esforço:** Alto
-
-**Conceito:** Torneio entre modelos de IA. Ranking global por modelo.
-
-```
-POST /tournaments → cria torneio
-POST /tournaments/{id}/agents → registra agente com modelo
-POST /tournaments/{id}/start → inicia
-GET  /tournaments/{id}/leaderboard → ranking ao vivo
-GET  /tournaments/{id}/results → resultado final
-```
-
-**Modos de torneio:**
-- `survival`: Quem sobrevive mais ticks
-- `social`: Quem tem mais chats + enterros + amizade
-- `efficiency`: Relação custo/performance (custo em USD por ponto de score)
-
-**Expansão natural:** ranking por provider, por profile e por persona.
-
----
-
-### 🟢 Baixa Prioridade — Melhorias de Qualidade
-
-#### M12 — Testes Unitários do Motor
-**Status:** ✅ Viável | **Impacto:** 🔥 | **Esforço:** Médio
-
-**Proposta da conversa:** "testes de regressão do mundo"
-
-- `pytest` para regras determinísticas
-- Testar: tick de morte, enterro, zumbi, BFS pathfinding, vitals
-- CI básico via GitHub Actions
-
----
-
-#### M13 — Dockerfile e Docker Compose
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Baixo
-
-**Setup simples:**
-```yaml
-services:
-  backend:
-    build: ./backend
-    ports: ["8000:8000"]
-    env_file: .env
-  frontend:
-    image: nginx:alpine
-    volumes: ["./frontend:/usr/share/nginx/html"]
-    ports: ["3000:80"]
-```
-
----
-
-#### M14 — WebSocket Escalável (Redis Pub/Sub)
-**Status:** ✅ Viável (com Redis) | **Impacto:** 🔥 | **Esforço:** Alto
-
-**Problema atual:** `ConnectionManager` em memória → single-worker only.
-
-**Solução com Redis:**
-- Add `redis` e `broadcaster` ao requirements
-- Substituir `ConnectionManager` por pub/sub via Redis channel
-- Permite múltiplos workers Uvicorn (horizontal scale)
-- **Necessário apenas se quiser múltiplos workers** (baixa prioridade para demo)
-
-**Observação:** isso confirma o limite já observado no código atual e é uma melhoria de infraestrutura, não de gameplay.
-
----
-
-#### M15 — README e Docs Completos
-**Status:** ✅ Viável | **Impacto:** 🔥🔥 | **Esforço:** Baixo
-
-- README atualizado com arquitetura, screenshots, badges
-- Documentação em `/docs`
-- ADR (Architecture Decision Records) para decisões importantes
-- `CONTRIBUTING.md` para colaboradores
-- Notas de divergência entre documentação e implementação quando houver comportamento ainda não corrigido
-
----
-
-## ❌ O que NÃO será feito (nesta versão)
-
-### Integração Roblox (Sem migração)
-**Status:** ❌ Fora de escopo | **Motivo:** Mudança de plataforma completa
-
-A integração Roblox **não será feita**, mas o backend está preparado para ela:
-- O endpoint `/agents/think` já pode ser chamado por Luau via `HttpService:RequestAsync()`
-- Seria necessário: Roblox Studio, Luau scripting, PathfindingService
-- Se quiser no futuro: o backend atual funciona sem mudanças como gateway para Roblox
-
-### Vector DB para Memória
-**Status:** ❌ Overkill | **Motivo:** Overhead desnecessário
-
-O ChatGPT sugeriu "vector DB depois" para memória. Para o escopo atual, **dict JSON é suficiente** (M06). Qdrant/Chroma seriam necessários apenas com centenas de agentes e histórico multi-sessão por agente.
-
-### GenerationService / Procedural World
-**Status:** ❌ Fora de escopo | **Motivo:** Feature Roblox específica
-
-O `GenerationService` mencionado é nativo do Roblox. Não aplicável aqui.
-
-### 500 Modelos ao Mesmo Tempo no Primeiro Ciclo
-**Status:** ❌ Não recomendado | **Motivo:** Custo, observabilidade e governança do caos
-
-A ideia é boa como visão de longo prazo, mas antes disso a ilha precisa de:
-- budget por agente
-- replay
-- decision log
-- scoreboard persistente
-- fallback por provider
-
----
-
-## 📊 Matriz de Viabilidade
-
-| ID | Melhoria | Viável? | Impacto | Esforço | Prioridade |
-|----|----------|---------|---------|---------|-----------|
-| M01 | Multi-Provider / OmniRouter | ✅ Sim | 🔥🔥🔥 | Médio | 🔴 Alta |
-| M02 | Budget de tokens | ✅ Sim | 🔥🔥🔥 | Baixo | 🔴 Alta |
-| M03 | Decision Log NDJSON | ✅ Sim | 🔥🔥🔥 | Baixo | 🔴 Alta |
-| M04 | Replay de sessão | ✅ Sim | 🔥🔥🔥 | Médio | 🔴 Alta |
-| M05 | Scoreboard SQLite | ✅ Sim | 🔥🔥 | Baixo | 🔴 Alta |
-| M06 | Memória 4 camadas | ✅ Sim | 🔥🔥🔥 | Alto | 🟡 Média |
-| M07 | simulation-core módulo | ✅ Sim | 🔥🔥 | Médio | 🟡 Média |
-| M08 | Regras determinísticas | ✅ Sim | 🔥🔥 | Médio | 🟡 Média |
-| M09 | Frontend observer turbinado | ✅ Sim | 🔥🔥 | Alto | 🟡 Média |
-| M10 | Owner/Token por agente | ✅ Sim | 🔥🔥🔥 | Médio | 🟡 Média |
-| M11 | API de torneio | ✅ Sim | 🔥🔥🔥 | Alto | 🟡 Média |
-| M12 | Testes unitários | ✅ Sim | 🔥 | Médio | 🟢 Baixa |
-| M13 | Dockerfile | ✅ Sim | 🔥🔥 | Baixo | 🟢 Baixa |
-| M14 | Redis WebSocket | ✅ Sim | 🔥 | Alto | 🟢 Baixa |
-| M15 | Docs completos | ✅ Sim | 🔥🔥 | Baixo | 🔴 Alta |
-| R01 | Integração Roblox | ❌ Não | — | Muito alto | ❌ |
-| R02 | Vector DB memória | ❌ Overkill | — | Alto | ❌ |
-| R03 | 500 modelos no primeiro ciclo | ❌ Não recomendado | — | Muito alto | ❌ |
-
----
-
-## 🗓️ Roadmap de Implementação
-
-### v0.2 — Engine Confiável (Quick Wins)
-> **Objetivo:** Base sólida para benchmark. Sem mudar gameplay.
-
-- [x] Documentação técnica `/docs`
-- [ ] Corrigir `DELETE /agent/{id}` para exigir admin token
-- [ ] M02 — Budget de tokens e cooldown
-- [ ] M03 — Decision Log NDJSON estruturado
-- [ ] M05 — Scoreboard SQLite detalhado
-- [ ] M15 — README atualizado
-- [ ] M13 — Dockerfile
-
-**Entrega:** Backend mais confiável, com logging e custo controlado.
-
----
-
-### v0.3 — Multi-Provider Benchmark
-> **Objetivo:** Transformar a ilha em benchmark real de modelos de IA.
-
-- [ ] M01 — AI Adapter multi-provider (OmniRouter + Gemini + OpenAI-compatible)
-- [ ] M07 — Refatoração simulation-core modular
-- [ ] M08 — Separação regras determinísticas
-- [ ] M06 — Memória em 4 camadas
-- [ ] M12 — Testes unitários do motor
-
-**Entrega:** Cada NPC usa um modelo diferente. Ranking por modelo ao vivo.
-
----
-
-### v0.4 — Plataforma de Competição
-> **Objetivo:** Usuários registram agentes e competem.
-
-- [ ] M04 — Replay de sessão (gravação + player)
-- [ ] M09 — Frontend observer turbinado (painel por agente, timeline)
-- [ ] M10 — Owner/Token por agente (registro público)
-- [ ] M11 — API de torneio/campeonato
-
-**Entrega:** Campeonato aberto. Cada pessoa configura seu agente com seu modelo preferido.
-
----
-
-### v0.5 — Escala (Opcional)
-> **Objetivo:** Suportar muitos usuários simultâneos.
-
-- [ ] M14 — Redis Pub/Sub para WebSocket multi-worker
-- [ ] Deploy em VPS com Nginx + Docker Compose
-
----
-
-## ⚠️ Guardrails Obrigatórios (da conversa ChatGPT)
-
-> Estes pontos foram explicitados como riscos críticos e devem ser implementados primeiro.
-
-1. **Cooldown de pensamento por NPC** — Nunca chamar IA mais de 1x por N ticks
-2. **Orçamento por agente** — Limite de tokens/custo configurável
-3. **Ação sempre validada pela engine** — IA sugere, engine valida e aplica
-4. **Logging por decisão** — Rastreabilidade de cada chamada de IA
-5. **Fallback por provider/modelo** — Se Gemini falha, não trava o jogo
-
----
-
-## 💡 Próximos Passos Imediatos
-
-1. Corrigir `DELETE /agent/{id}` para exigir `X-Admin-Token`
-2. Implementar **M02 (Budget)** + **M03 (Decision Log)** — Levam < 1 dia
-3. Criar **SQLite scoreboard (M05)** — Substitui o JSON frágil atual
-4. Criar **AI Adapter (M01)** com OmniRouter — O cenário mais empolgante
-5. Começar com 2-3 modelos diferentes por NPC e gravar estatísticas
+## Critérios de Aceite Globais
+
+- ✅ Backend sem erro em startup
+- ✅ 31/31 testes unitários passando
+- ✅ Frontend conecta e exibe estado em tempo real
+- ✅ Dashboard carrega KPIs e scoreboard
+- ✅ Webhook registrado e listado com sucesso
+- ✅ Export CSV de scoreboard com 175+ entradas
+- ✅ Torneio com status detalhado e leaderboard

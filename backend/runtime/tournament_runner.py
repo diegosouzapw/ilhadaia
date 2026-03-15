@@ -52,8 +52,16 @@ class TournamentRunner:
             if tournament.get("status") not in ("active", "running"):
                 continue
 
-            start_tick = tournament.get("start_tick", 0)
-            duration = tournament.get("config", {}).get("duration_ticks", 200)
+            start_tick = tournament.get("start_tick")
+            if start_tick is None:
+                # Backward-compat: torneios antigos não tinham start_tick explícito
+                start_tick = current_tick
+                tournament["start_tick"] = start_tick
+
+            duration = (
+                tournament.get("duration_ticks")
+                or tournament.get("config", {}).get("duration_ticks", 200)
+            )
             if current_tick - start_tick >= duration:
                 await self._finalize_tournament(tid, tournament, current_tick)
 
@@ -85,7 +93,7 @@ class TournamentRunner:
         tournament["winner"] = leaderboard[0] if leaderboard else None
 
         # Auto-reset se configurado
-        if tournament.get("config", {}).get("reset_on_finish"):
+        if tournament.get("reset_on_finish", tournament.get("config", {}).get("reset_on_finish")):
             logger.info(f"Tournament {tid}: reset_on_finish=True, scheduling world reset")
 
         logger.info(f"Tournament {tid} finalized. Winner: {tournament.get('winner', {}).get('agent_name', 'N/A')}")
@@ -126,11 +134,14 @@ class TournamentRunner:
             return None
         current_tick = self.world.ticks
         start_tick = tournament.get("start_tick", current_tick)
-        duration = tournament.get("config", {}).get("duration_ticks", 200)
+        duration = (
+            tournament.get("duration_ticks")
+            or tournament.get("config", {}).get("duration_ticks", 200)
+        )
         ticks_remaining = max(0, duration - (current_tick - start_tick))
         return {
             "id": tid,
-            "name": tournament.get("config", {}).get("name", tid),
+            "name": tournament.get("name") or tournament.get("config", {}).get("name", tid),
             "status": tournament.get("status", "waiting"),
             "current_tick": current_tick,
             "start_tick": start_tick,

@@ -45,7 +45,7 @@ class RelationalEntry:
 class AgentMemory:
     """Memória em 4 camadas para um agente. Stateful por sessão."""
 
-    SHORT_TERM_MAX = 10
+    SHORT_TERM_MAX = 20
     EPISODIC_MAX   = 50
 
     def __init__(self):
@@ -59,7 +59,20 @@ class AgentMemory:
         entry = ShortTermEntry(tick=tick, action=action, thought=thought, result=result)
         self.short_term.append(entry)
         if len(self.short_term) > self.SHORT_TERM_MAX:
-            self.short_term.pop(0)
+            self._flush_oldest_to_episodic()
+
+    def _flush_oldest_to_episodic(self) -> None:
+        """Move o item mais antigo do short_term para episódica (compressão simples)."""
+        if not self.short_term:
+            return
+        oldest = self.short_term.pop(0)
+        summary = oldest.thought or f"Ação: {oldest.action}"
+        self.add_episodic(
+            tick=oldest.tick,
+            event_type="memory_flush",
+            description=f"Resumo automático: {summary[:120]}",
+            agents_involved=[],
+        )
 
     def get_short_term_summary(self) -> str:
         if not self.short_term:

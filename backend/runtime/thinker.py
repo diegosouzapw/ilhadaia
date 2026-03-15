@@ -12,6 +12,7 @@ from .adapters.base import AIAdapter, AIResponse
 from .adapters.gemini import GeminiAdapter
 from .adapters.openai_compatible import OpenAICompatibleAdapter
 from .profiles import AgentProfile, get_profile
+from .relevance import get_relevant_summary
 from .schemas import ActionDecision
 from storage.decision_log import DecisionLog, DecisionRecord
 
@@ -66,6 +67,13 @@ class Thinker:
                 else "skip_budget"
             )
             logger.debug(f"[{agent.name}] skip: {reason}")
+            self.log.log_skip(
+                session_id=session_id,
+                tick=current_tick,
+                agent_id=agent.id,
+                agent_name=agent.name,
+                reason=reason,
+            )
             return None
 
         # 2. Buscar perfil e adapter
@@ -174,7 +182,21 @@ Sua personalidade: {agent.personality}
         memory_ctx = ""
         agent_memory = getattr(agent, "agent_memory", None)
         if agent_memory is not None:
-            memory_ctx = f"\n{agent_memory.to_prompt_context()}\n"
+            relevance_query = " ".join([
+                str(world_context.get("reachable_now", "")),
+                str(world_context.get("visible_entities", ""))[:400],
+                f"hp={agent.hp} hunger={agent.hunger} thirst={agent.thirst}",
+            ])
+            relevant_episodes = get_relevant_summary(
+                agent_memory.episodic,
+                context=relevance_query,
+                current_tick=tick,
+                top_k=5,
+            )
+            memory_ctx = (
+                f"\n{agent_memory.to_prompt_context()}\n\n"
+                f"🎯 EPISÓDIOS MAIS RELEVANTES AGORA:\n{relevant_episodes}\n"
+            )
 
         base = f"""
 TICK ATUAL: {tick}

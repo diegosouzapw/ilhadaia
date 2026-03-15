@@ -17,14 +17,15 @@ from typing import Optional
 
 # T18: Rate Limiting
 try:
-    from slowapi import Limiter
+    from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
-    from fastapi.responses import JSONResponse
     limiter = Limiter(key_func=get_remote_address)
     RATE_LIMIT_ENABLED = True
 except ImportError:
     limiter = None
+    _rate_limit_exceeded_handler = None
+    RateLimitExceeded = None
     RATE_LIMIT_ENABLED = False
 
 from world import World
@@ -64,12 +65,13 @@ _current_session_id: Optional[str] = None
 # Torneios em memória + runner
 TOURNAMENTS: dict[str, dict] = {}
 tournament_runner: Optional[TournamentRunner] = None
+_notified_finished_tournaments: set[str] = set()
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class JoinRequest(BaseModel):
-    agent_id: str = Field(..., example="777")
-    name: str = Field(..., example="Visitante")
-    personality: str = Field(..., example="Curioso e amigável")
+    agent_id: str = Field(..., json_schema_extra={"example": "777"})
+    name: str = Field(..., json_schema_extra={"example": "Visitante"})
+    personality: str = Field(..., json_schema_extra={"example": "Curioso e amigável"})
 
 class ActionRequest(BaseModel):
     thought: str = ""
@@ -105,8 +107,21 @@ async def lifespan(app: FastAPI):
     global _current_session_id, thinker, tournament_runner
     # === STARTUP ===
     thinker = Thinker(decision_log=decision_log)
+
+    async def _thinker_decider(agent, context, tick):
+        if thinker is None or _current_session_id is None:
+            return await agent.act(context)
+        return await thinker.think(
+            agent=agent,
+            world_context=context,
+            current_tick=tick,
+            session_id=_current_session_id,
+        )
+
+    world.set_ai_decider(_thinker_decider)
     _world_settings = {"ai_interval": world.ai_interval, "player_count": world.player_count}
     _current_session_id = session_store.create_session(_world_settings)
+    world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
     task = asyncio.create_task(world_loop())
@@ -125,11 +140,27 @@ async def lifespan(app: FastAPI):
         pass
     replay_store.close()
     decision_log.close()
+    tournament_runner.stop() if tournament_runner else None
+    memory_store.close()
+    webhook_manager.close()
     session_store.close()
     logger.info("🛑 World simulation stopped cleanly.")
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="BBB de IA - Backend Engine", lifespan=lifespan)
+
+# T18: inicialização de rate limiting (quando slowapi estiver instalado)
+if RATE_LIMIT_ENABLED and limiter and _rate_limit_exceeded_handler and RateLimitExceeded:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+def _rate_limit(limit: str):
+    """Decorator condicional de rate limit."""
+    def decorator(func):
+        if RATE_LIMIT_ENABLED and limiter:
+            return limiter.limit(limit)(func)
+        return func
+    return decorator
 
 app.add_middleware(
     CORSMiddleware,
@@ -166,6 +197,28 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+async def _dispatch_webhooks_from_events(events: list[dict]) -> None:
+    """Dispara webhooks para eventos críticos sem impactar o game loop."""
+    tasks = []
+    for event in events:
+        action = event.get("action")
+        if action == "die":
+            tasks.append(webhook_manager.fire_event("death", {
+                "agent_id": event.get("agent_id", ""),
+                "agent_name": event.get("name", ""),
+                "tick": world.ticks,
+                "event_msg": event.get("event_msg", ""),
+            }))
+        elif action == "zombie":
+            tasks.append(webhook_manager.fire_event("zombie", {
+                "agent_id": event.get("agent_id", ""),
+                "agent_name": event.get("name", ""),
+                "tick": world.ticks,
+                "event_msg": event.get("event_msg", ""),
+            }))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 # ── Game Loop ─────────────────────────────────────────────────────────────────
 async def world_loop():
     while True:
@@ -182,10 +235,25 @@ async def world_loop():
                     for agent in world.agents:
                         try:
                             session_store.upsert_agent_score(_current_session_id, agent)
+                            if getattr(agent, "owner_id", ""):
+                                memory_store.save(agent)
                         except Exception:
                             pass
                     # Snapshot de replay
                     replay_store.maybe_snapshot(world.ticks, world.get_state())
+
+            if isinstance(events, list) and events:
+                asyncio.create_task(_dispatch_webhooks_from_events(events))
+
+            # Notifica fim de torneio uma única vez por torneio
+            for tournament_id, tournament in TOURNAMENTS.items():
+                if tournament.get("status") == "finished" and tournament_id not in _notified_finished_tournaments:
+                    _notified_finished_tournaments.add(tournament_id)
+                    asyncio.create_task(webhook_manager.fire_event("tournament_end", {
+                        "tournament_id": tournament_id,
+                        "winner": tournament.get("winner", {}),
+                        "tick": world.ticks,
+                    }))
 
             if events or world.ticks % 1 == 0:
                 await manager.broadcast({
@@ -222,10 +290,14 @@ def read_root():
 async def reset_game(player_count: int = 4):
     global _current_session_id
     if _current_session_id:
+        for agent in world.agents:
+            if getattr(agent, "owner_id", ""):
+                memory_store.save(agent)
         replay_store.force_snapshot(world.ticks, world.get_state())
         session_store.end_session(_current_session_id, None, None)
     _world_settings = {"ai_interval": world.ai_interval, "player_count": world.player_count}
     _current_session_id = session_store.create_session(_world_settings)
+    world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
     world.reset_agents(Agent, player_count=player_count)
@@ -272,7 +344,8 @@ async def get_profiles():
 # ── Agent Registration (T14) ──────────────────────────────────────────────────
 
 @app.post("/agents/register")
-async def register_agent(reg: AgentRegistration):
+@_rate_limit("10/minute")
+async def register_agent(request: Request, reg: AgentRegistration):
     """Owner registra um agente customizado na ilha."""
     if reg.profile_id not in BUILTIN_PROFILES:
         raise HTTPException(400, f"Profile '{reg.profile_id}' não existe. Disponíveis: {list(BUILTIN_PROFILES.keys())}")
@@ -296,8 +369,16 @@ async def register_agent(reg: AgentRegistration):
     new_agent.token_budget = profile.token_budget
     new_agent.cooldown_ticks = profile.cooldown_ticks
 
+    memory_store.load(new_agent)
     world.add_agent(new_agent)
     logger.info(f"🤖 Registered agent: {reg.agent_name} [{reg.profile_id}] by {reg.owner_id}")
+    asyncio.create_task(webhook_manager.fire_event("agent_registered", {
+        "agent_id": agent_id,
+        "agent_name": reg.agent_name,
+        "owner_id": reg.owner_id,
+        "profile_id": reg.profile_id,
+        "tick": world.ticks,
+    }))
 
     await manager.broadcast({
         "type": "update", "data": world.get_state(),
@@ -332,18 +413,28 @@ async def get_agent_state(agent_id: str):
 # ── Tournaments (T15) ─────────────────────────────────────────────────────────
 
 @app.post("/tournaments", dependencies=[Depends(verify_admin_token)])
-async def create_tournament(config: TournamentConfig):
+@_rate_limit("5/minute")
+async def create_tournament(request: Request, config: TournamentConfig):
     t_id = f"tournament_{int(time.time())}"
+    config_data = config.model_dump()
     TOURNAMENTS[t_id] = {
-        "id": t_id, "name": config.name, "status": "waiting",
-        "max_agents": config.max_agents, "duration_ticks": config.duration_ticks,
+        "id": t_id,
+        "name": config.name,
+        "status": "waiting",
+        "config": config_data,
+        "max_agents": config.max_agents,
+        "duration_ticks": config.duration_ticks,
+        "reset_on_finish": config.reset_on_finish,
         "allowed_profiles": config.allowed_profiles or list(BUILTIN_PROFILES.keys()),
-        "started_at": None, "end_tick": None, "registered_agents": [],
+        "start_tick": None,
+        "started_at": None,
+        "end_tick": None,
+        "registered_agents": [],
     }
-    return {"tournament_id": t_id, "config": config.dict()}
+    return {"tournament_id": t_id, "config": config_data}
 
 @app.post("/tournaments/{t_id}/join")
-async def join_tournament(t_id: str, reg: AgentRegistration):
+async def join_tournament(request: Request, t_id: str, reg: AgentRegistration):
     t = TOURNAMENTS.get(t_id)
     if not t:
         raise HTTPException(404, "Torneio não existe")
@@ -354,7 +445,7 @@ async def join_tournament(t_id: str, reg: AgentRegistration):
     if t["allowed_profiles"] and reg.profile_id not in t["allowed_profiles"]:
         raise HTTPException(400, f"Perfil não permitido. Permitidos: {t['allowed_profiles']}")
 
-    result = await register_agent(reg)
+    result = await register_agent(request, reg)
     t["registered_agents"].append(result["agent_id"])
     return result
 
@@ -363,32 +454,14 @@ async def start_tournament(t_id: str):
     t = TOURNAMENTS.get(t_id)
     if not t:
         raise HTTPException(404, "Torneio não existe")
-    t["status"] = "running"
+    t["status"] = "active"
+    t["start_tick"] = world.ticks
     t["started_at"] = time.time()
     t["end_tick"] = world.ticks + t["duration_ticks"]
+    world.active_tournament_id = t_id
+    world.tournament_end_tick = t["end_tick"]
+    _notified_finished_tournaments.discard(t_id)
     return {"message": "Torneio iniciado!", "end_tick": t["end_tick"]}
-
-@app.get("/tournaments/{t_id}/leaderboard")
-async def get_tournament_leaderboard(t_id: str):
-    t = TOURNAMENTS.get(t_id)
-    if not t:
-        raise HTTPException(404, "Torneio não existe")
-    leaderboard = []
-    for agent_id in t["registered_agents"]:
-        agent = next((a for a in world.agents if a.id == agent_id), None)
-        if agent:
-            leaderboard.append({
-                "agent_id": agent_id,
-                "name": agent.name,
-                "owner": getattr(agent, "owner_id", "?"),
-                "profile": getattr(agent, "profile_id", "default"),
-                "score": agent.benchmark.get("score", 0.0),
-                "tokens_used": getattr(agent, "tokens_used", 0),
-                "alive": agent.is_alive,
-                "hp": agent.hp,
-            })
-    leaderboard.sort(key=lambda x: x["score"], reverse=True)
-    return {"tournament_id": t_id, "name": t["name"], "status": t["status"], "leaderboard": leaderboard}
 
 @app.get("/tournaments")
 async def list_tournaments():
@@ -483,15 +556,6 @@ async def rate_limit_status(request: Request):
         } if RATE_LIMIT_ENABLED else "Rate limiting not active (slowapi not installed)"
     }
 
-# Aplicar rate limit se disponível
-def _rate_limit(limit: str):
-    """Decorator condicional de rate limit."""
-    def decorator(func):
-        if RATE_LIMIT_ENABLED and limiter:
-            return limiter.limit(limit)(func)
-        return func
-    return decorator
-
 # ═══════════════════════════════════════════════════════════════════════
 # T19 — Exportação CSV/JSON
 # ═══════════════════════════════════════════════════════════════════════
@@ -502,7 +566,7 @@ async def export_session(session_id: str, format: str = "json"):
     Exporta os frames de replay de uma sessão como JSON ou CSV.
     Query param: ?format=json (default) | csv
     """
-    frames = replay_store.load_session(session_id)
+    frames = replay_store.load_replay(session_id)
     if not frames:
         raise HTTPException(404, f"Sessão '{session_id}' não encontrada ou sem frames.")
 
@@ -517,7 +581,7 @@ async def export_session(session_id: str, format: str = "json"):
                 writer.writerow({
                     "tick": frame.get("tick", ""),
                     "session_id": session_id,
-                    "agent_count": len(frame.get("agents", [])),
+                    "agent_count": len(frame.get("state", {}).get("agents", [])),
                 })
         output.seek(0)
         return StreamingResponse(
@@ -648,7 +712,8 @@ class WebhookRegistration(BaseModel):
     secret: str = ""
 
 @app.post("/webhooks/register")
-async def register_webhook(reg: WebhookRegistration):
+@_rate_limit("20/hour")
+async def register_webhook(request: Request, reg: WebhookRegistration):
     """
     Registra uma URL de webhook para receber notificações de eventos.
     Eventos válidos: death, win, zombie, tournament_end, agent_registered, all
@@ -705,7 +770,7 @@ async def system_info():
             "decision_log": True,
         },
         "rate_limit": RATE_LIMIT_ENABLED,
-        "active_tournaments": len([t for t in TOURNAMENTS.values() if t.get("status") == "active"]),
-        "registered_webhooks": len(webhook_manager.list_for_owner("all") if False else []),
+        "active_tournaments": len([t for t in TOURNAMENTS.values() if t.get("status") in ("active", "running")]),
+        "registered_webhooks": webhook_manager.conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0],
         "agents_with_memory": len(memory_store.list_agents_with_memory()),
     }

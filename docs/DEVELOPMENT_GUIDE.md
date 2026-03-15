@@ -1,186 +1,146 @@
-# 🚀 Guia de Desenvolvimento — BBBia: A Ilha da IA
-
-> Para colaboradores e desenvolvedores que querem contribuir ou estender o projeto.
+# 🛠️ Guia de Desenvolvimento — BBBia Versão Turbinada v0.5
 
 ---
 
-## Setup Rápido
+## Setup Local
 
-### Pré-requisitos
-- Python 3.9+
-- Node.js apenas para servir o frontend (opcional, pode usar qualquer servidor HTTP)
-- Conta no [Google AI Studio](https://aistudio.google.com) para Gemini API key
-
-### Backend
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# ou: venv\Scripts\activate  # Windows
+# 1. Clone e entre no backend
+cd ilhadaia/backend
 
+# 2. Instalar dependências (Python 3.12+)
 pip install -r requirements.txt
 
-# Configurar variáveis
-cp .env.example .env
-# Editar .env com sua GEMINI_API_KEY
+# 3. Configurar .env
+cp ../.env.example .env
+# Edite: GEMINI_API_KEY, ADMIN_TOKEN, OMNIROUTER_URL
 
-# Iniciar servidor
-uvicorn main:app --reload --port 8000
-```
+# 4. Iniciar backend
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 
-### Frontend
-```bash
-# Opção 1: arquivo direto (funciona localmente)
-# Abrir frontend/index.html no browser
-
-# Opção 2: servidor HTTP simples
-cd frontend
-python -m http.server 3000
-# Acessar http://localhost:3000
+# 5. Abrir frontend
+# Navegue para frontend/index.html no browser (file:// ou http server)
+# Navegue para frontend/dashboard.html para o dashboard analítico
 ```
 
 ---
 
-## Estrutura do Projeto
+## Variáveis de Ambiente (`.env`)
 
-```
-ilhadaia/
-├── backend/
-│   ├── .env.example          # Template de variáveis de ambiente
-│   ├── agent.py              # Classe Agent (IA, vitals, memória)
-│   ├── hall_of_fame.json     # Persistência de scores (gerado em runtime)
-│   ├── main.py               # FastAPI app, endpoints, WebSocket
-│   ├── requirements.txt      # Dependências Python
-│   ├── world.py              # Motor de simulação (World class)
-│   └── world_settings.json   # Configurações persistentes (gerado em runtime)
-├── frontend/
-│   ├── index.html            # HTML do observer
-│   ├── main.js               # Three.js + WebSocket + game logic
-│   ├── style.css             # Estilos do HUD e UI
-│   └── test_api.html         # Página de teste manual de APIs
-├── docs/                     # Documentação técnica (esta pasta)
-├── assets/                   # Imagens e recursos estáticos
-├── GUIDE_VISITANTE.md        # Guia para agentes visitantes remotos
-├── README.md                 # README principal
-└── test_remote_api.py        # Script de teste de agente remoto
+```env
+# Obrigatórias
+GEMINI_API_KEY=sua_chave_aqui
+
+# Segurança
+ADMIN_TOKEN=dev_token_123          # Token para endpoints admin
+AUTHORIZED_IDS=777,888,999         # IDs autorizados para /join
+
+# OmniRouter (provider OpenAI-compat)
+OMNIROUTER_URL=http://192.168.0.15:20128
+
+# CORS (inclua "null" para file://)
+ALLOWED_ORIGINS=http://localhost:3000,null
 ```
 
 ---
 
-## Fluxo de Desenvolvimento
+## Via Docker
 
-### Adicionando um novo tipo de ação
-1. Adicionar ação no `system_instruction` em `agent.py`
-2. Adicionar handler em `world.py:_apply_action()`
-3. Adicionar visual no frontend `main.js:handleEvents()`
-4. Documentar em `docs/API_REFERENCE.md`
-
-### Adicionando um novo tipo de entidade
-1. Criar entidade em `world.py:_init_map()` (ou dinamicamente)
-2. Adicionar renderização em `main.js:updateWorld()`
-3. Adicionar função `createXXX()` no frontend
-4. Documentar em `docs/GAME_STATE.md`
-
-### Atualizando o modelo de IA
-- Trocar `self.model_name` em `agent.py`
-- Modelos disponíveis no Google AI Studio
-- Verificar compatibilidade de `response_mime_type="application/json"`
-- Se a ideia for multi-provider, prefira criar um adapter novo em vez de crescer o acoplamento dentro de `agent.py`
-
----
-
-## Variáveis de Ambiente
-
-| Variável | Obrigatória | Default | Descrição |
-|----------|-------------|---------|-----------|
-| `GEMINI_API_KEY` | ✅ | — | Chave do Google AI Studio |
-| `ADMIN_TOKEN` | ❌ | `dev_token_123` | Token de admin para reset/settings |
-| `AUTHORIZED_IDS` | ❌ | `777` | IDs permitidos para agentes remotos (vírgula) |
-| `ALLOWED_ORIGINS` | ❌ | `*` | CORS origins permitidas |
-
----
-
-## Testando Agentes Remotos
-
-### Via script Python
 ```bash
-python test_remote_api.py
-```
-
-### Via curl
-```bash
-# Entrar na ilha
-curl -X POST http://localhost:8000/join \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "777", "name": "MeuBot", "personality": "Estratégico e frio"}'
-
-# Ver contexto
-curl http://localhost:8000/agent/777/context
-
-# Executar ação
-curl -X POST http://localhost:8000/agent/777/action \
-  -H "Content-Type: application/json" \
-  -d '{"thought": "Vou explorar", "action": "move_to", "speak": "Indo explorar!", "params": {"target_x": 10, "target_y": 10}}'
+docker-compose up --build
+# Backend em http://localhost:8001
+# Frontend servido pelo nginx em http://localhost:80
 ```
 
 ---
 
-## Padrões de Código
+## Estrutura de Módulos
 
-### Backend (Python)
-- Usar `async/await` para operações de I/O
-- Logging via `logging.getLogger("BBB_IA")`
-- Persistência via JSON (hall_of_fame.json, world_settings.json)
-- Ações validadas sempre em `world._apply_action()`
-- Evitar empurrar regra crítica de negócio para o prompt quando ela puder ficar no engine
+### `runtime/` — Motor de IA
+Todos os novos providers e adaptadores vão aqui:
 
-### Frontend (JavaScript)
-- Sem frameworks — Vanilla JS
-- Estado sincronizado via WebSocket do servidor (server is source of truth)
-- Meshes Three.js indexados por entity_id (`meshes[id]`)
-- Posições suavizadas via interpolação no `animate()` loop
+```python
+# Novo adapter em runtime/adapters/meu_provider.py
+from runtime.adapters.base import AIAdapter, AIResponse
+
+class MeuAdapter(AIAdapter):
+    async def complete(self, messages: list[dict], max_tokens: int) -> AIResponse:
+        # Sua lógica aqui
+        return AIResponse(text="...", tokens_in=0, tokens_out=0, latency_ms=0)
+```
+
+Após criar o adapter, registre no `runtime/profiles.py`:
+
+```python
+BUILTIN_PROFILES["meu-perfil"] = AgentProfile(
+    profile_id="meu-perfil",
+    provider="meu-provider",
+    model="meu-modelo",
+    token_budget=5000,
+    cooldown_ticks=3,
+    max_tokens=512,
+)
+```
+
+### `storage/` — Persistência
+Todos os módulos de storage seguem a mesma interface:
+
+```python
+class MeuStorage:
+    def __init__(self, db_path: str = "data/ilhadaia.db"): ...
+    def close(self) -> None: self.conn.close()
+```
+
+Registre a nova instância no `lifespan` do `main.py`.
 
 ---
 
-## Rodando em Produção
+## Adicionando um Endpoint
 
-> ⚠️ Ainda não há configuração oficial de produção. Abaixo, sugestão básica.
+```python
+# Em main.py, adicione após os endpoints existentes
 
-```bash
-# Backend — Multiple workers NÃO suportado ainda (ConnectionManager em memória)
-uvicorn main:app --host 0.0.0.0 --port 8000
+class MeuRequest(BaseModel):
+    meu_campo: str
 
-# OU com Gunicorn (single worker)
-gunicorn main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+@app.get("/meu-endpoint")
+async def meu_endpoint(request: Request):
+    # Se quiser rate limit: @limiter.limit("10/minute") antes do @app.get
+    return {"resultado": "exemplo"}
+
+@app.post("/meu-endpoint", dependencies=[Depends(verify_admin_token)])
+async def criar_algo(req: MeuRequest):
+    return {"criado": req.meu_campo}
 ```
-
-> **Nginx** pode ser usado como proxy reverso. Ver `docs/IMPROVEMENT_PLAN.md` para plano de escalabilidade.
-
-**Observação adicional:** o uso atual de `@app.on_event("startup")` funciona bem para o protótipo. Se o backend crescer, vale migrar para `lifespan` para controlar melhor startup/shutdown de recursos.
 
 ---
 
-## Debugging
+## Rodando os Testes
 
-### Logs do backend
-O backend usa `logging` padrão com level `INFO`. Para mais detalhes:
 ```bash
-uvicorn main:app --log-level debug
+cd backend
+pytest tests/ -v
+# Expected: 31 passed in < 1s
 ```
 
-### Inspecionar estado do mundo
-```bash
-# Ver estado atual pelo endpoint raiz
-curl http://localhost:8000/
-```
+Para adicionar testes novos, edite `backend/tests/test_engine.py`.
 
-> **Nota:** o endpoint raiz mostra apenas status + ticks. O estado completo do mundo vem pelo WebSocket `/ws`.
+---
 
-### Inspecionar persistência local
-```bash
-cat backend/world_settings.json
-cat backend/hall_of_fame.json
-```
+## Ciclo de Contribuição
 
-### Inspecionar via WebSocket
-Abrir `frontend/test_api.html` para painel de teste manual.
+1. Crie a tasks em `docs/tasks/TXX-nome.md` (ver arquivos existentes como modelo)
+2. Implemente o módulo em `backend/runtime/` ou `backend/storage/`
+3. Integre no `main.py` (imports + lifespan + endpoints)
+4. Adicione testes em `backend/tests/test_engine.py`
+5. Atualize `docs/IMPROVEMENT_PLAN.md` e `docs/API_REFERENCE.md`
+
+---
+
+## Observações de Arquitetura
+
+- **Estado global:** `world`, `TOURNAMENTS`, `_current_session_id` são globais em `main.py`. Mudanças devem ser thread-safe (asyncio.Lock se necessário)
+- **SQLite WAL:** Todos os módulos de storage conectam ao mesmo arquivo `data/ilhadaia.db` com WAL mode — suporta múltiplos readers + 1 writer simultâneos
+- **CORS file://** O header `null` no CORS é necessário para o frontend funcionar diretamente via `file://` em desenvolvimento. Em produção, filtrar por origin real
+- **WebSocket single-worker:** O `ConnectionManager` atual só funciona com 1 worker uvicorn. Para múltiplos workers, implementar T17 (Redis pub/sub)
+- **Rate limiting:** O decorator `@limiter.limit("...")` usa a variável `request: Request` — sempre inclua como parâmetro do endpoint

@@ -101,25 +101,46 @@ Agente morre
 
 ---
 
-## Sistema de Score
+## Sistema de Score & Benchmark (v0.5)
 
-### Scoreboard atual (simplificado)
-Hall of Fame salva top 3 por `score = apples_eaten + water_drunk + chats_sent`.
+### Scoreboard SQLite (multi-sessão)
+Cada agente tem sua entrada em `agent_scores` (SQLite WAL) atualizada por sessão.
 
-### Pontuação por ação
+| Campo | Descrição |
+|-------|-----------|
+| `agent_name` | Nome do agente |
+| `model` | Modelo de IA usado |
+| `profile_id` | Perfil (gemini-native, balanced...) |
+| `score_total` | Pontuação acumulada |
+| `tokens_used` | Total de tokens consumidos |
+| `cost_usd` | Custo estimado em dólares |
+| `decisions_made` | Total de decisões IA tomadas |
+
+### Critérios de Score
 | Ação | Pontos |
 |------|--------|
-| Comer fruta | +1 `apples_eaten` |
-| Beber água | +1 `water_drunk` |
-| Falar/Chat | +1 `chats_sent` |
+| Comer fruta | +1 (`apples_eaten`) |
+| Beber água | +1 (`water_drunk`) |
+| Falar/Chat | +1 (`chats_sent`) |
+| Sobreviver uma noite | Bônus implícito (mais ticks = mais oportunidades) |
 
-### Vitórias por sessão
-Guardado em `scores` dict: `scores[name] = count_of_wins`.
+### Benchmark do Agente (em memória)
+Cada `Agent` mantém um dict `benchmark` com métricas ao vivo:
 
-### Limitações do score atual
-- Não registra qual modelo foi usado pelo agente
-- Não separa sobrevivência, utilidade social e eficiência
-- Não persiste histórico completo por sessão
+```python
+agent.benchmark = {
+    "score": 0.0,
+    "decisions_made": 0,
+    "tokens_used": 0,
+    "cost_usd": 0.0,
+    "latency_ms_avg": 0.0,
+    "invalid_actions": 0,
+}
+```
+
+### Export
+- `GET /world/scoreboard/export?format=csv` — CSV com 200+ entradas
+- `GET /sessions/{id}/decisions/export?format=csv` — NDJSON decisions como CSV
 
 ---
 

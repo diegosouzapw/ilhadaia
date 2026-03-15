@@ -8,6 +8,7 @@ import time
 from typing import Optional
 
 from .base import AIAdapter, AIResponse
+from runtime.schemas import ActionDecision
 
 logger = logging.getLogger("BBB_IA.adapters.openai_compat")
 
@@ -56,8 +57,7 @@ class OpenAICompatibleAdapter(AIAdapter):
             content = response.choices[0].message.content or ""
             usage = response.usage
 
-            # Tentar parsear como JSON
-            data = self._extract_json(content)
+            data = self._parse_decision(content)
 
             return self._parse_action_from_dict(
                 data, latency,
@@ -95,3 +95,11 @@ class OpenAICompatibleAdapter(AIAdapter):
         # Fallback total
         logger.warning(f"JSON parse failed for: {text[:100]}")
         return {"thought": "Erro de parse", "speak": "...", "action": "wait", "params": {}}
+
+    def _parse_decision(self, text: str) -> dict:
+        """Valida o output no schema ActionDecision com fallback robusto."""
+        try:
+            return ActionDecision.model_validate_json(text).model_dump()
+        except Exception:
+            data = self._extract_json(text)
+            return ActionDecision.from_dict(data).model_dump()

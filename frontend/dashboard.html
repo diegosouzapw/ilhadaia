@@ -256,9 +256,18 @@
 <script>
 // ── Config ──────────────────────────────────────────────────────────────────
 const API = (() => {
-  const port = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 8001 : 8001;
-  return `http://${window.location.hostname || 'localhost'}:${port}`;
+  const host = window.location.hostname || 'localhost';
+  const backendPortOverride =
+    new URLSearchParams(window.location.search).get('backend_port') ||
+    localStorage.getItem('bbb_backend_port');
+  if (backendPortOverride) {
+    return `http://${host}:${backendPortOverride}`;
+  }
+  if (window.location.protocol === 'file:') {
+    return `http://${host}:8001`;
+  }
+  const port = window.location.port === '3000' ? 8000 : (window.location.port || 8000);
+  return `http://${host}:${port}`;
 })();
 
 let tokensChart, scoresChart, profilesChart;
@@ -329,7 +338,7 @@ async function loadSessionData() {
   if (!sid) return;
   try {
     const data = await fj(`/sessions/${sid}/replay`);
-    const frames = data.replay || [];
+    const frames = data.frames || [];
     // Atualizar gráficos com os frames da sessão
     updateCharts(frames, sid);
   } catch(e) { console.warn('Session data error', e); }

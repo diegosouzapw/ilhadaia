@@ -9,6 +9,23 @@ let replayIndex = 0;
 let replayInterval = null;
 const REPLAY_FPS_MS = 300; // 300ms por frame = ~3 FPS
 
+function getApiBaseUrl() {
+    const host = window.location.hostname || 'localhost';
+    const backendPortOverride =
+        new URLSearchParams(window.location.search).get('backend_port') ||
+        localStorage.getItem('bbb_backend_port');
+    if (backendPortOverride) {
+        return `http://${host}:${backendPortOverride}`;
+    }
+    if (window.location.protocol === 'file:') {
+        return `http://${host}:8001`;
+    }
+    const port = window.location.port === '3000' ? '8000' : (window.location.port || '8000');
+    return `http://${host}:${port}`;
+}
+
+const BENCHMARK_API_BASE_URL = getApiBaseUrl();
+
 // ─── HUD de Benchmark ─────────────────────────────────────────────────────────
 
 /**
@@ -61,7 +78,7 @@ async function showAgentModal(agentId) {
     // Só busca API se não for replay
     let state;
     try {
-        const resp = await fetch(`/agents/${agentId}/state`);
+        const resp = await fetch(`${BENCHMARK_API_BASE_URL}/agents/${agentId}/state`);
         if (!resp.ok) throw new Error('not found');
         state = await resp.json();
     } catch {
@@ -128,7 +145,7 @@ function addEventToTimeline(events, tick) {
 
 async function initReplayPanel() {
     try {
-        const resp = await fetch('/sessions?limit=30');
+        const resp = await fetch(`${BENCHMARK_API_BASE_URL}/sessions?limit=30`);
         const data = await resp.json();
         const sel = document.getElementById('session-select');
         if (!sel) return;
@@ -155,7 +172,7 @@ async function loadReplay() {
     statusEl.textContent = 'Carregando…';
 
     try {
-        const resp = await fetch(`/sessions/${sessionId}/replay`);
+        const resp = await fetch(`${BENCHMARK_API_BASE_URL}/sessions/${sessionId}/replay`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 

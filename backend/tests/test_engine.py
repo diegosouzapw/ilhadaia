@@ -105,7 +105,7 @@ class TestAgentMemory:
     def test_short_term_max_size(self):
         for i in range(20):
             self.mem.add_short_term(tick=i, action="wait")
-        assert len(self.mem.short_term) == 10  # max 10
+        assert len(self.mem.short_term) == 20  # max 20
 
     def test_episodic_add(self):
         self.mem.add_episodic(5, "attack", "João atacou Maria", ["Maria"])
@@ -184,6 +184,24 @@ class TestProfiles:
             assert profile.token_budget > 0
             assert profile.cooldown_ticks >= 0
             assert profile.max_tokens > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# Agent Budget/Cooldown
+# ══════════════════════════════════════════════════════════════
+
+class TestAgentBudgetCooldown:
+    def test_can_think_respects_cooldown_and_budget(self):
+        from agent import Agent
+        a = Agent("Tester", "Pragmático", 0, 0)
+        a.cooldown_ticks = 3
+        a.last_thought_tick = 10
+        assert not a.can_think(12)
+        assert a.can_think(13)
+
+        a.token_budget = 100
+        a.tokens_used = 100
+        assert not a.can_think(20)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -318,3 +336,21 @@ class TestSessionStore:
             self.store.create_session({"i": i})
         sessions = self.store.get_sessions(limit=10)
         assert len(sessions) >= 3
+
+
+# ══════════════════════════════════════════════════════════════
+# API Endpoint: /profiles
+# ══════════════════════════════════════════════════════════════
+
+class TestProfilesEndpoint:
+    def test_profiles_endpoint_returns_profiles(self):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/profiles")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "profiles" in data
+            assert isinstance(data["profiles"], list)
+            assert len(data["profiles"]) > 0

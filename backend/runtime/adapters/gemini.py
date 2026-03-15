@@ -8,6 +8,7 @@ import os
 import time
 
 from .base import AIAdapter, AIResponse
+from runtime.schemas import ActionDecision
 
 logger = logging.getLogger("BBB_IA.adapters.gemini")
 
@@ -18,6 +19,12 @@ class GeminiAdapter(AIAdapter):
     def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash-lite"):
         api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         self._model_id = model
+        if not api_key:
+            # Sem chave, não inicializa cliente para evitar erro assíncrono de fechamento.
+            self._client = None
+            self._genai = None
+            logger.warning("GeminiAdapter init skipped: GEMINI_API_KEY ausente")
+            return
         try:
             from google import genai
             self._client = genai.Client(api_key=api_key)
@@ -61,7 +68,18 @@ class GeminiAdapter(AIAdapter):
             if text.endswith("```"):
                 text = text[:-3]
 
-            data = json.loads(text)
+            try:
+                decision = ActionDecision.model_validate_json(text)
+                data = decision.model_dump()
+            except Exception:
+                # Fallback: parse de texto/JSON livre com coerção para schema válido
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    data = {}
+                decision = ActionDecision.from_dict(data)
+                data = decision.model_dump()
+
             usage = getattr(response, "usage_metadata", None)
             prompt_tokens = getattr(usage, "prompt_token_count", 0) if usage else 0
             completion_tokens = getattr(usage, "candidates_token_count", 0) if usage else 0

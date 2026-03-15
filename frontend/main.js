@@ -67,10 +67,15 @@ document.getElementById('volume-slider').value = globalVolume;
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 // --- Configuração de URLs Dinâmicas ---
-// Detecta ambiente: arquivo local usa 8001, produção usa o host atual
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '' || window.location.protocol === 'file:';
-const BACKEND_PORT = isLocal ? '8001' : (window.location.port || '');
-const BACKEND_HOST = isLocal ? 'localhost' : window.location.hostname;
+// Arquivo local (file://) usa 8001. Frontend servido em :3000 usa backend em :8000.
+const isFileProtocol = window.location.protocol === 'file:';
+const backendPortOverride =
+    new URLSearchParams(window.location.search).get('backend_port') ||
+    localStorage.getItem('bbb_backend_port');
+const BACKEND_PORT = backendPortOverride
+    ? String(backendPortOverride)
+    : (isFileProtocol ? '8001' : (window.location.port === '3000' ? '8000' : (window.location.port || '8000')));
+const BACKEND_HOST = window.location.hostname || 'localhost';
 
 const API_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const WS_URL = `ws://${BACKEND_HOST}:${BACKEND_PORT}/ws`;
@@ -835,6 +840,16 @@ function updateWorld(data) {
         }
     }
     invContainer.innerHTML = invHTML;
+}
+
+// T13/T16: renderer de replay chamado por benchmark.js
+function renderWorldStateReplay(state, tickOverride) {
+    if (!state) return;
+    const replayState = { ...state };
+    if (tickOverride !== undefined && tickOverride !== null) {
+        replayState.ticks = tickOverride;
+    }
+    updateWorld(replayState);
 }
 
 // Chat Persistence Helpers
