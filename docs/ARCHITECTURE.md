@@ -1,6 +1,6 @@
 # Arquitetura — BBBia v0.6 (feature-diego)
 
-> Estado: **Produção** | Backend: FastAPI 0.115 | Python 3.12 | Março 2026
+> Estado: **Produção** | Backend: FastAPI 0.111 | Python 3.12 | Março 2026
 
 ---
 
