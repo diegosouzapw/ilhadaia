@@ -49,6 +49,7 @@ from runtime.profiles import (
     get_profile,
     BUILTIN_PROFILES,
     OMNIROUTER_URL,
+    OMNIROUTER_API_KEY,
 )
 from runtime.tournament_runner import TournamentRunner  # T20
 
@@ -109,8 +110,8 @@ class AISettingsRequest(BaseModel):
 
 
 def _normalize_provider(provider: Optional[str]) -> str:
-    if (provider or "").strip().lower() == "gemini":
-        return "gemini"
+    # Mantem compatibilidade com valores antigos, mas o runtime agora opera
+    # apenas via endpoints OpenAI-compatible.
     return "omnirouter"
 
 
@@ -122,16 +123,10 @@ def _normalize_omni_base_url(url: Optional[str]) -> str:
 
 
 def _catalog_api_key() -> str:
-    return (
-        os.getenv("OMNIROUTER_API_KEY")
-        or os.getenv("OMNIROUTE_API_KEY")
-        or "omniroute-local"
-    )
+    return OMNIROUTER_API_KEY
 
 
 def _default_model_for_provider(provider: str) -> str:
-    if provider == "gemini":
-        return get_profile("gemini-native").model
     return get_profile("claude-kiro").model
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
@@ -225,25 +220,42 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> bool:
         await websocket.accept()
+        try:
+            await websocket.send_text(json.dumps({"type": "init", "data": world.get_state()}))
+        except WebSocketDisconnect:
+            logger.info("Client disconnected before init payload was sent.")
+            return False
+        except Exception as exc:
+            logger.info("Client connection dropped during init payload: %s", exc)
+            return False
+
         self.active_connections.append(websocket)
         logger.info(f"Client connected. Total: {len(self.active_connections)}")
-        await websocket.send_text(json.dumps({"type": "init", "data": world.get_state()}))
+        return True
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logger.info("Client disconnected.")
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"Client disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         if not self.active_connections:
             return
         msg_str = json.dumps(message)
-        for connection in self.active_connections:
+        stale_connections: list[WebSocket] = []
+        for connection in list(self.active_connections):
             try:
                 await connection.send_text(msg_str)
-            except Exception as e:
-                logger.error(f"Error broadcasting message: {e}")
+            except WebSocketDisconnect:
+                stale_connections.append(connection)
+            except Exception as exc:
+                stale_connections.append(connection)
+                logger.info("Dropping stale WebSocket connection during broadcast: %s", exc)
+
+        for connection in stale_connections:
+            self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -319,12 +331,16 @@ async def world_loop():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    connected = await manager.connect(websocket)
+    if not connected:
+        return
     try:
         while True:
             data = await websocket.receive_text()
             logger.debug(f"Received message from client: {data}")
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 @app.get("/")
@@ -402,7 +418,7 @@ async def set_ai_settings(req: AISettingsRequest):
 
 @app.get("/models")
 async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
-    """Lista modelos para o menu auxiliar da UI sem substituir o fluxo de profiles."""
+    """Lista modelos de um endpoint OpenAI-compatible sem substituir o fluxo de profiles."""
     target_provider = _normalize_provider(provider or world.ai_provider)
     target_url = _normalize_omni_base_url(url or world.omniroute_url)
 
@@ -421,60 +437,40 @@ async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
     for profile in builtin_profiles:
         add_model(profile.model, f"{profile.profile_id} ({profile.model})", "builtin_profile")
 
-    if target_provider == "gemini":
-        curated_gemini = [
-            ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
-            ("gemini-2.5-flash", "Gemini 2.5 Flash"),
-            ("gemini-2.0-flash", "Gemini 2.0 Flash"),
-            ("gemini-1.5-pro", "Gemini 1.5 Pro"),
-        ]
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                from google import genai
-
-                client = genai.Client(api_key=gemini_key)
-                for model in client.models.list():
-                    model_id = model.name.replace("models/", "")
-                    lowered = model_id.lower()
-                    if (
-                        (model_id.startswith("gemini") or model_id.startswith("gemma"))
-                        and all(x not in lowered for x in ("embedding", "vision", "image", "aqa"))
-                    ):
-                        add_model(model_id, getattr(model, "display_name", model_id), "dynamic")
-            except Exception as exc:
-                logger.error("Error fetching dynamic Gemini models: %s", exc)
-
-        for model_id, name in curated_gemini:
-            add_model(model_id, name)
-    else:
-        curated_omni = [
-            ("gpt-4o", "GPT-4o"),
-            ("gpt-4o-mini", "GPT-4o Mini"),
-            ("claude-3-5-sonnet", "Claude 3.5 Sonnet"),
-            ("claude-3-5-haiku", "Claude 3.5 Haiku"),
-            ("qwen-2.5-72b-instruct", "Qwen 2.5 72B"),
-            ("meta-llama/llama-3.1-70b-instruct", "Llama 3.1 70B"),
-        ]
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(
-                    f"{target_url}/models",
-                    headers={"Authorization": f"Bearer {_catalog_api_key()}"},
+    curated_omni = [
+        ("kr/claude-sonnet-4.5", "Claude Sonnet 4.5 via Kiro"),
+        ("kr/claude-haiku-4.5", "Claude Haiku 4.5 via Kiro"),
+        ("if/kimi-k2", "Kimi K2 via iFlow"),
+        ("if/qwen3-coder-plus", "Qwen3 Coder Plus via iFlow"),
+        ("gc/gemini-2.5-flash", "Gemini 2.5 Flash via gateway"),
+        ("groq/moonshotai/kimi-k2-instruct", "Kimi K2 Instruct via Groq"),
+        ("groq/llama-3.3-70b-versatile", "Llama 3.3 70B via Groq"),
+        ("gpt-4o-mini", "GPT-4o Mini"),
+        ("gpt-4o", "GPT-4o"),
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{target_url}/models",
+                headers={"Authorization": f"Bearer {_catalog_api_key()}"},
+            )
+            if response.status_code == 200:
+                payload = response.json()
+                for model in payload.get("data", []) if isinstance(payload, dict) else []:
+                    model_id = model.get("id")
+                    if model_id:
+                        add_model(model_id, model.get("name", model_id), "dynamic")
+            else:
+                logger.warning(
+                    "Failed to fetch OpenAI-compatible models from %s: %s",
+                    target_url,
+                    response.status_code,
                 )
-                if response.status_code == 200:
-                    payload = response.json()
-                    for model in payload.get("data", []) if isinstance(payload, dict) else []:
-                        model_id = model.get("id")
-                        if model_id:
-                            add_model(model_id, model.get("name", model_id), "dynamic")
-                else:
-                    logger.warning("Failed to fetch OmniRouter models from %s: %s", target_url, response.status_code)
-        except Exception as exc:
-            logger.error("Error proxying OmniRouter models from %s: %s", target_url, exc)
+    except Exception as exc:
+        logger.error("Error proxying OpenAI-compatible models from %s: %s", target_url, exc)
 
-        for model_id, name in curated_omni:
-            add_model(model_id, name)
+    for model_id, name in curated_omni:
+        add_model(model_id, name)
 
     if not final_models:
         add_model(_default_model_for_provider(target_provider), "Padrao do provider", "default")
@@ -482,7 +478,7 @@ async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
     return {
         "scope": "catalog",
         "provider": target_provider,
-        "base_url": target_url if target_provider == "omnirouter" else None,
+        "base_url": target_url,
         "models": final_models,
     }
 

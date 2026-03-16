@@ -54,7 +54,7 @@ function updateBenchmarkHUD(agents, sessionId) {
         const tokenPct = Math.min(100, (tokens / budget) * 100);
         const score = (a.benchmark?.score ?? 0).toFixed(1);
         const hp = a.hp ?? 0;
-        const model = a.profile_id ?? 'gemini';
+        const model = a.profile_id ?? 'claude-kiro';
         const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
 
         return `<tr class="${isDead ? 'agent-dead' : ''}" onclick="showAgentModal('${a.id}')" title="Ver detalhes">
@@ -243,8 +243,6 @@ function applyReplayFrame(index) {
 // Inicializa o painel de replay quando a página carregar
 window.addEventListener('DOMContentLoaded', () => {
     setTimeout(initReplayPanel, 2000); // espera 2s para o backend subir
-    initBenchmarkDrag();
-    restoreBenchmarkPosition();
 });
 
 // Fechar modal com ESC

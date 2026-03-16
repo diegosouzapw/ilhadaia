@@ -15,6 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import asyncio
 import json
 import tempfile
 import sqlite3
@@ -181,7 +182,7 @@ class TestProfiles:
         from runtime.profiles import BUILTIN_PROFILES
         for pid, profile in BUILTIN_PROFILES.items():
             assert profile.profile_id == pid
-            assert profile.provider in ("gemini", "omnirouter")
+            assert profile.provider == "omnirouter"
             assert profile.token_budget > 0
             assert profile.cooldown_ticks >= 0
             assert profile.max_tokens > 0
@@ -358,6 +359,50 @@ class TestProfilesEndpoint:
             assert len(data["profiles"]) > 0
 
 
+class TestConnectionManager:
+    class FakeWebSocket:
+        def __init__(self, send_error: Exception | None = None):
+            self.accepted = False
+            self.sent_messages: list[str] = []
+            self.send_error = send_error
+
+        async def accept(self):
+            self.accepted = True
+
+        async def send_text(self, message: str):
+            if self.send_error is not None:
+                raise self.send_error
+            self.sent_messages.append(message)
+
+    def test_connect_does_not_keep_socket_when_init_send_fails(self):
+        import main
+
+        main = importlib.reload(main)
+        manager = main.ConnectionManager()
+        websocket = self.FakeWebSocket(send_error=RuntimeError("closed"))
+
+        connected = asyncio.run(manager.connect(websocket))
+
+        assert connected is False
+        assert websocket.accepted is True
+        assert manager.active_connections == []
+
+    def test_broadcast_prunes_dead_connections(self):
+        import main
+
+        main = importlib.reload(main)
+        manager = main.ConnectionManager()
+        good_socket = self.FakeWebSocket()
+        bad_socket = self.FakeWebSocket(send_error=RuntimeError("closed"))
+        manager.active_connections = [good_socket, bad_socket]
+
+        asyncio.run(manager.broadcast({"type": "update", "data": {}}))
+
+        assert good_socket in manager.active_connections
+        assert bad_socket not in manager.active_connections
+        assert len(good_socket.sent_messages) == 1
+
+
 class TestAISettingsEndpoints:
     def test_get_ai_settings_exposes_catalog_scope(self):
         from fastapi.testclient import TestClient
@@ -369,7 +414,7 @@ class TestAISettingsEndpoints:
             assert resp.status_code == 200
             data = resp.json()
             assert data["scope"] == "catalog_default"
-            assert data["ai_provider"] in ("gemini", "omnirouter")
+            assert data["ai_provider"] == "omnirouter"
             assert "note" in data
 
     def test_post_ai_settings_updates_catalog_preset(self):
@@ -404,6 +449,7 @@ class TestAISettingsEndpoints:
             assert resp.status_code == 200
             data = resp.json()
             assert data["scope"] == "catalog"
-            assert data["provider"] == "gemini"
+            assert data["provider"] == "omnirouter"
+            assert data["base_url"]
             assert isinstance(data["models"], list)
             assert len(data["models"]) > 0

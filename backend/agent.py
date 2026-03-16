@@ -3,17 +3,30 @@ import json
 import logging
 from uuid import uuid4
 from dotenv import load_dotenv
-from google import genai
-from pydantic import BaseModel, Field
+from openai import AsyncOpenAI
+from runtime.profiles import OMNIROUTER_URL, OMNIROUTER_API_KEY, get_profile
 
 # Carrega as variáveis do .env file
 load_dotenv(override=True)
 
 logger = logging.getLogger("BBB_IA.Agent")
 
-# Determine API key
-def get_current_key():
-    return os.getenv("GEMINI_API_KEY")
+def get_current_api_key():
+    return (
+        os.getenv("OMNIROUTER_API_KEY")
+        or os.getenv("OMNIROUTE_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or OMNIROUTER_API_KEY
+    )
+
+
+def get_current_base_url():
+    return (
+        os.getenv("OMNIROUTER_URL")
+        or os.getenv("OMNIROUTE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or OMNIROUTER_URL
+    )
 
 class Agent:
     def __init__(self, name: str, personality: str, start_x: int, start_y: int, is_remote: bool = False, agent_id: str = None):
@@ -75,7 +88,7 @@ class Agent:
         elif self.name == "Zeca": home_coords = "(17, 2)"
         else: home_coords = "(2, 17)" # Elly/Carla/etc
 
-        # Setup Gemini Model with structured output instruction
+        # Setup default model instruction for the OpenAI-compatible fallback path
         system_instruction = f"""
         Você é um personagem em uma simulação de sobrevivência 3D.
         Seu nome é {self.name}.
@@ -113,13 +126,14 @@ class Agent:
         }}
         """
         
-        # Setup Gemini Client
-        current_key = get_current_key()
+        # Legacy fallback client. O runtime principal usa Thinker + profiles.
+        current_key = get_current_api_key()
+        current_base_url = get_current_base_url()
         try:
-             self.client = genai.Client(api_key=current_key) if current_key else None
-             #self.model_name = 'gemini-3.1-flash-lite-preview'
-             self.model_name = 'gemini-2.5-flash-lite'
-             self.system_instruction = system_instruction
+            self.client = AsyncOpenAI(base_url=current_base_url, api_key=current_key)
+            self.provider = "omnirouter"
+            self.model_name = get_profile(self.profile_id).model
+            self.system_instruction = system_instruction
         except Exception as e:
             logger.error(f"Failed to init model client: {e}")
             self.client = None
@@ -148,20 +162,21 @@ class Agent:
         if not self.is_alive or self.is_remote:
             return None
 
-        current_key = get_current_key()
+        current_key = get_current_api_key()
         if not self.client or not current_key:
-            # Fallback random movement if API not configured
-             import random
-             action = {
-                 "thought": "I don't have a brain API key, wandering randomly...",
-                 "action": "move",
-                 "dx": random.choice([-1, 0, 1]),
-                 "dy": random.choice([-1, 0, 1])
-             }
-             logger.debug(f"{self.name} generated fallback action: {action}")
-             return action
+            # Fallback random movement if API client is unavailable
+            import random
+            action = {
+                "thought": "No OpenAI-compatible brain configured, wandering randomly...",
+                "action": "move",
+                "dx": random.choice([-1, 0, 1]),
+                "dy": random.choice([-1, 0, 1])
+            }
+            logger.debug(f"{self.name} generated fallback action: {action}")
+            return action
 
         # Build prompt based on context
+        self.model_name = get_profile(getattr(self, "profile_id", "claude-kiro")).model
         prompt = f"""
         TICK ATUAL: {context['time']}
         PERÍODO: {"🌙 NOITE" if context.get('is_night') else "☀️ DIA"}
@@ -196,16 +211,16 @@ class Agent:
         """
         
         try:
-            # Make the API call
-            response = self.client.models.generate_content(
+            response = await self.client.chat.completions.create(
                 model=self.model_name,
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    response_mime_type="application/json",
-                ),
+                messages=[
+                    {"role": "system", "content": self.system_instruction},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=300,
+                temperature=0.7,
             )
-            text_response = response.text.strip()
+            text_response = (response.choices[0].message.content or "").strip()
             
             # Clean up potential markdown formatting from the response
             if text_response.startswith("```json"):
@@ -247,7 +262,10 @@ class Agent:
             return final_action
             
         except Exception as e:
-            logger.error(f"Error generating action for {self.name}: {e}\nResponse was: {response.text if 'response' in locals() else 'None'}")
+            logger.error(
+                f"Error generating action for {self.name}: {e}\n"
+                f"Response was: {text_response if 'text_response' in locals() else 'None'}"
+            )
             return {
                 "agent_id": self.id, 
                 "name": self.name, 

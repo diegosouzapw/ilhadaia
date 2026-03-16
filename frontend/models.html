@@ -550,7 +550,7 @@ function renderRegisterProfileOptions() {
 
   const current = select.value || 'claude-kiro';
   select.innerHTML = _profiles.map(p => {
-    const providerLabel = p.provider === 'gemini' ? 'Gemini API' : 'OmniRoute';
+    const providerLabel = 'OmniRouter / OpenAI-compatible';
     return `<option value="${p.profile_id}">${p.profile_id} — ${p.model} (${providerLabel})</option>`;
   }).join('');
 
@@ -575,7 +575,7 @@ function renderSidebarProfiles() {
                 : pfx === 'if' ? 'iFlow'
                 : pfx === 'gc' ? 'Gemini CLI'
                 : pfx === 'groq' ? 'Groq'
-                : pfx === 'gemini' ? 'Gemini API'
+                : pfx === 'gemini' ? 'Gemini'
                 : pfx;
     return `
       <div class="profile-card" id="pc-${p.profile_id}" onclick="selectProfile('${p.profile_id}')">

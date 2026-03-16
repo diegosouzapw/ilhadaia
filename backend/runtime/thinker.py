@@ -9,7 +9,6 @@ import logging
 from typing import Optional
 
 from .adapters.base import AIAdapter, AIResponse
-from .adapters.gemini import GeminiAdapter
 from .adapters.openai_compatible import OpenAICompatibleAdapter
 from .profiles import AgentProfile, get_profile
 from .relevance import get_relevant_summary
@@ -29,18 +28,14 @@ class Thinker:
     # ── Adapter cache ───────────────────────────────────────────────────────
 
     def get_adapter(self, profile: AgentProfile) -> AIAdapter:
-        """Retorna (ou cria) o adapter para o perfil dado. Cache por profile_id."""
+        """Retorna (ou cria) o adapter OpenAI-compatible para o perfil dado."""
         key = profile.profile_id
         if key not in self._adapters:
-            if profile.provider == "gemini":
-                self._adapters[key] = GeminiAdapter(model=profile.model)
-            else:
-                # base_url vem do .env via OMNIROUTER_URL (definido em profiles.py)
-                self._adapters[key] = OpenAICompatibleAdapter(
-                    base_url=profile.base_url,
-                    model=profile.model,
-                    api_key=profile.api_key,
-                )
+            self._adapters[key] = OpenAICompatibleAdapter(
+                base_url=profile.base_url,
+                model=profile.model,
+                api_key=profile.api_key,
+            )
         return self._adapters[key]
 
     # ── Main think ──────────────────────────────────────────────────────────

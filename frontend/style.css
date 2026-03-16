@@ -31,7 +31,7 @@ body, html {
 }
 
 /* Individual UI elements must enable pointer events */
-#top-bar, #status-panel, #chat-panel, #inventories, #victory-overlay, #chat-filters, .filter-btn, #reset-btn, #time-display, #tick-interval-selector, #controls-panel, #global-nav, #header-container {
+#top-bar, #status-panel, #chat-panel, #inventories, #victory-overlay, #chat-filters, .filter-btn, #reset-btn, #time-display, #tick-interval-selector, #controls-panel, #global-nav, #header-container, #right-sidebar, .side-widget, .chat-shortcut, .sidebar-shortcut {
     pointer-events: auto;
 }
 
@@ -100,7 +100,7 @@ h1 {
     position: absolute;
     top: 16px;
     left: 150px;
-    right: 425px;
+    right: 400px;
     z-index: 180;
     display: flex;
     justify-content: space-between;
@@ -230,24 +230,69 @@ h1 {
 /* Chat e Histórico */
 #chat-panel {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 0;
-    background: rgba(0, 0, 0, 0.85);
+    left: 390px;
+    right: 400px;
+    bottom: 20px;
+    height: 280px;
+    background: rgba(5, 9, 15, 0.86);
     color: white;
-    padding: 20px;
-    width: 400px;
-    border-left: 2px solid #555;
-    backdrop-filter: blur(4px);
+    padding: 16px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    backdrop-filter: blur(12px);
     display: flex;
     flex-direction: column;
-    pointer-events: auto; /* Ensure chat highlights and allows clicks */
+    gap: 12px;
+    pointer-events: auto;
+    box-shadow: 0 22px 48px rgba(0,0,0,0.35);
+}
+
+#chat-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
 }
 
 #chat-panel h3 {
     margin-top: 0;
-    margin-bottom: 10px;
-    font-size: 14px;
+    margin-bottom: 6px;
+    font-size: 18px;
+    color: #ffeb3b;
+}
+
+#chat-panel-header p {
+    margin: 0;
+    color: rgba(255,255,255,0.7);
+    font-size: 12px;
+}
+
+.chat-panel-shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.chat-shortcut {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #f7f7f7;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 700;
+    transition: background 0.2s, transform 0.2s, border-color 0.2s;
+}
+
+.chat-shortcut:hover {
+    background: rgba(255,235,59,0.16);
+    border-color: rgba(255,235,59,0.45);
+    transform: translateY(-1px);
 }
 
 #chat-messages {
@@ -256,7 +301,7 @@ h1 {
     margin: 0;
     overflow-y: auto;
     flex-grow: 1;
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .chat-msg {
@@ -343,7 +388,8 @@ h1 {
 #chat-filters {
     display: flex;
     gap: 5px;
-    margin-bottom: 10px;
+    margin-bottom: 0;
+    flex-wrap: wrap;
 }
 .filter-btn {
     background: rgba(255, 255, 255, 0.1);
@@ -580,52 +626,136 @@ h1 {
     }
 }
 
+#right-sidebar {
+    position: absolute;
+    top: 130px;
+    right: 20px;
+    bottom: 20px;
+    width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    z-index: 170;
+}
+
+.side-widget {
+    background: rgba(8, 12, 18, 0.88);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
+    color: #e0e0e0;
+    box-shadow: 0 18px 38px rgba(0,0,0,0.28);
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+.sidebar-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.sidebar-card-header h3 {
+    margin: 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-card-header span {
+    color: rgba(255,255,255,0.5);
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+#shortcut-panel {
+    padding: 12px;
+}
+
+#shortcut-panel .sidebar-card-header {
+    padding: 0 0 10px 0;
+    margin-bottom: 2px;
+}
+
+.shortcut-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.sidebar-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #f5f5f5;
+    text-decoration: none;
+    transition: transform 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.sidebar-shortcut:hover {
+    transform: translateY(-2px);
+    background: rgba(255,235,59,0.1);
+    border-color: rgba(255,235,59,0.35);
+}
+
+.shortcut-icon {
+    font-size: 20px;
+}
+
+.shortcut-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.shortcut-copy strong {
+    font-size: 13px;
+}
+
+.shortcut-copy small {
+    color: rgba(255,255,255,0.6);
+    font-size: 11px;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    T16: HUD de Benchmark & Replay
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* HUD de Benchmark — arrastável, posição inicial canto superior direito */
+/* Benchmark no sidebar direito */
 #benchmark-hud {
-    position: fixed;
-    right: 0;
-    top: 60px;
-    width: 300px;
-    background: rgba(10, 10, 15, 0.92);
-    border: 1px solid #333;
-    border-radius: 8px 0 0 8px;
-    color: #e0e0e0;
+    position: relative;
+    width: 100%;
+    flex: 1.2;
+    min-height: 240px;
     font-size: 12px;
-    z-index: 1000;
-    max-height: 50vh;
-    overflow: hidden;
-    backdrop-filter: blur(8px);
-    box-shadow: -4px 4px 20px rgba(0,0,0,0.5);
-    transition: box-shadow 0.15s, opacity 0.2s;
-    user-select: none;
+    display: flex;
+    flex-direction: column;
 }
-#benchmark-hud.dragging {
-    box-shadow: -4px 8px 30px rgba(0,0,0,0.7);
-    opacity: 0.95;
-}
-/* Alça de arrastar */
+
 #benchmark-drag-handle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px 6px;
-    cursor: grab;
-    border-bottom: 1px solid #2a2a2a;
+    gap: 10px;
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
     background: rgba(255, 152, 0, 0.08);
 }
-#benchmark-drag-handle:active { cursor: grabbing; }
+
 #benchmark-drag-handle h3 {
     color: #ff9800;
     margin: 0;
-    font-size: 12px;
+    font-size: 13px;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
-.bm-drag-icon { color: #555; font-size: 14px; cursor: grab; }
+.bm-drag-icon { color: #ff9800; font-size: 15px; }
 .bm-collapse-btn {
     background: transparent;
     border: none;
@@ -637,13 +767,13 @@ h1 {
     line-height: 1;
 }
 .bm-collapse-btn:hover { color: #ff9800; }
-/* Corpo do HUD */
 #benchmark-hud-body {
-    padding: 8px 10px 10px;
+    padding: 10px 12px 12px;
+    flex: 1;
     overflow-y: auto;
-    max-height: calc(50vh - 38px);
+    max-height: none;
 }
-#benchmark-hud h3 { display: none; } /* Esconde h3 antigo — agora está na handle */
+
 #benchmark-table {
     width: 100%;
     border-collapse: collapse;
@@ -702,25 +832,18 @@ tr.agent-dead td {
 .session-id-cell { color: #555; font-size: 10px; margin-top: 6px; }
 
 
-/* Painel de Replay — lateral esquerda inferior */
+/* Painel de Replay no sidebar direito */
 #replay-panel {
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    width: 280px;
-    background: rgba(10, 10, 15, 0.9);
-    border-top: 2px solid #333;
-    border-right: 2px solid #333;
-    color: #e0e0e0;
     padding: 10px 12px;
+    flex: 0.72;
+    min-height: 170px;
     font-size: 12px;
-    z-index: 1000;
-    backdrop-filter: blur(8px);
 }
+
 #replay-panel h3 {
     color: #4fc3f7;
-    margin: 0 0 8px 0;
-    font-size: 12px;
+    margin: 0;
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -742,35 +865,27 @@ tr.agent-dead td {
     accent-color: #4fc3f7;
 }
 
-/* Timeline de Eventos — lateral direita inferior */
+/* Timeline de Eventos no sidebar direito */
 #event-timeline {
-    position: fixed;
-    right: 0;
-    bottom: 0;
-    width: 300px;
-    max-height: 220px;
-    background: rgba(10, 10, 15, 0.9);
-    border-top: 2px solid #333;
-    border-left: 2px solid #333;
-    color: #e0e0e0;
-    padding: 8px 12px;
+    padding: 0;
+    flex: 0.95;
+    min-height: 200px;
     font-size: 11px;
-    z-index: 1000;
-    overflow: hidden;
-    backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
 }
-#event-timeline h3 {
-    color: #aaa;
-    margin: 0 0 6px 0;
-    font-size: 11px;
-    text-transform: uppercase;
+
+#event-timeline .sidebar-card-header h3 {
+    color: #cfd8dc;
 }
+
 #event-list {
     list-style: none;
-    padding: 0;
+    padding: 0 14px 14px;
     margin: 0;
     overflow-y: auto;
-    max-height: 170px;
+    flex: 1;
+    max-height: none;
 }
 #event-list li.event-item {
     padding: 3px 0;
@@ -841,3 +956,123 @@ tr.agent-dead td {
     overflow-y: auto;
 }
 .modal-memory li { margin-bottom: 4px; }
+
+@media (max-width: 1400px) {
+    #chat-panel {
+        left: 360px;
+        right: 380px;
+    }
+
+    #status-panel {
+        width: 320px;
+    }
+
+    #right-sidebar {
+        width: 340px;
+    }
+
+    #header-container {
+        right: 380px;
+    }
+}
+
+@media (max-width: 1100px) {
+    #right-sidebar {
+        top: 150px;
+        right: 16px;
+        width: 320px;
+    }
+
+    #status-panel {
+        width: 300px;
+    }
+
+    #chat-panel {
+        left: 336px;
+        right: 352px;
+        height: 250px;
+    }
+
+    #inventories {
+        flex-wrap: wrap;
+        max-width: 300px;
+    }
+}
+
+@media (max-width: 860px) {
+    body, html {
+        overflow-y: auto;
+    }
+
+    #ui-layer {
+        min-height: 100%;
+        overflow-y: auto;
+    }
+
+    #global-nav {
+        left: 12px;
+        right: 12px;
+        width: calc(100% - 24px);
+        justify-content: space-between;
+    }
+
+    #global-nav-links {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    #header-container {
+        left: 16px;
+        right: 16px;
+        top: 72px;
+    }
+
+    #time-display {
+        top: 128px;
+        left: 16px;
+        right: 16px;
+        transform: none;
+        min-width: 0;
+        white-space: normal;
+    }
+
+    #status-panel {
+        top: 248px;
+        left: 16px;
+        right: 16px;
+        bottom: auto;
+        width: auto;
+    }
+
+    #right-sidebar {
+        position: absolute;
+        top: 620px;
+        left: 16px;
+        right: 16px;
+        bottom: 280px;
+        width: auto;
+    }
+
+    #chat-panel {
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+        height: 240px;
+    }
+
+    #chat-panel-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .chat-panel-shortcuts {
+        justify-content: flex-start;
+    }
+
+    #inventories {
+        left: 16px;
+        right: 16px;
+        bottom: 270px;
+        max-width: none;
+    }
+}

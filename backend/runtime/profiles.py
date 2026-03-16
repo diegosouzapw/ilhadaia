@@ -1,9 +1,9 @@
 """
-Agent Profiles — define o perfil de IA de cada agente para benchmark multi-provider.
+Agent Profiles — catalogo unificado de perfis OpenAI-compatible por agente.
 Cada perfil determina: provider, modelo, budget de tokens, cooldown e temperatura.
 
-Todos os perfis OmniRoute usam o mesmo endpoint (OMNIROUTER_URL) — só o modelo muda.
-O endpoint é lido de OMNIROUTER_URL no .env (default: http://192.168.0.15:20128/v1).
+O runtime desta branch opera sobre um unico eixo: endpoints OpenAI-compatible.
+OmniRouter segue como default, mas qualquer base URL compativel pode ser usada.
 """
 import os
 from dataclasses import dataclass
@@ -13,9 +13,9 @@ from typing import Optional
 @dataclass
 class AgentProfile:
     profile_id: str
-    provider: str              # "gemini" | "omnirouter"
+    provider: str              # "omnirouter" (gateway OpenAI-compatible)
     model: str                 # nome do modelo (ex: "kr/claude-sonnet-4.5")
-    base_url: Optional[str] = None   # URL do provider (para omnirouter)
+    base_url: Optional[str] = None   # URL do endpoint OpenAI-compatible
     temperature: float = 0.7
     max_tokens: int = 300
     token_budget: int = 10_000       # limite de tokens por sessão
@@ -28,6 +28,7 @@ class AgentProfile:
 OMNIROUTER_URL = (
     os.getenv("OMNIROUTER_URL")
     or os.getenv("OMNIROUTE_URL")
+    or os.getenv("OPENAI_BASE_URL")
     or "http://192.168.0.15:20128/v1"
 )
 
@@ -35,6 +36,7 @@ OMNIROUTER_URL = (
 OMNIROUTER_API_KEY = (
     os.getenv("OMNIROUTER_API_KEY")
     or os.getenv("OMNIROUTE_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
     or "omniroute-local"
 )
 
@@ -47,7 +49,6 @@ OMNIROUTER_API_KEY = (
 #   qw/  → Qwen (Device Code — grátis e ilimitado)
 #   gc/  → Gemini CLI (Google OAuth — 180K tok/mês grátis)
 #   groq/ → Groq API (30 RPM grátis)
-#   gemini/ → Gemini API Key direta
 #
 # Endpoint é SEMPRE o mesmo: OMNIROUTER_URL. Só o modelo/prefixo muda.
 #
@@ -118,7 +119,7 @@ BUILTIN_PROFILES: dict[str, AgentProfile] = {
         temperature=0.7,
     ),
 
-    # ── Gemini Flash via Gemini CLI (grátis, pode ter cooldown) ────────────────
+    # ── Gemini Flash via gateway OpenAI-compatible ──────────────────────────────
     "gemini-flash": AgentProfile(
         profile_id="gemini-flash",
         provider="omnirouter",
@@ -142,16 +143,6 @@ BUILTIN_PROFILES: dict[str, AgentProfile] = {
         token_budget=8_000,
         cooldown_ticks=2,
         temperature=0.8,
-    ),
-
-    # ── Gemini nativo (sem OmniRoute — usa GEMINI_API_KEY diretamente) ────────
-    "gemini-native": AgentProfile(
-        profile_id="gemini-native",
-        provider="gemini",
-        model="gemini-2.5-flash-lite",
-        max_tokens=300,
-        token_budget=10_000,
-        cooldown_ticks=3,
     ),
 }
 

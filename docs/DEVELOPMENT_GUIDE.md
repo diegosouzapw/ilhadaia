@@ -30,7 +30,7 @@ ALLOWED_ORIGINS=*
 GEMINI_API_KEY=sua_chave_gemini_aqui
 ```
 
-Use `GEMINI_API_KEY` apenas se quiser habilitar `gemini-native`.
+Mantenha `GEMINI_API_KEY` apenas como exemplo de credencial externa. O fluxo default desta branch usa somente `OMNIROUTER_URL` + `OMNIROUTER_API_KEY`.
 
 ## Como validar localmente
 

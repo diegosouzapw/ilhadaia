@@ -31,13 +31,13 @@ class AIAdapter(ABC):
     @property
     @abstractmethod
     def provider_name(self) -> str:
-        """Identificador do provider (ex: 'gemini', 'omnirouter')."""
+        """Identificador do provider (ex: 'omnirouter')."""
         ...
 
     @property
     @abstractmethod
     def model_name(self) -> str:
-        """Nome completo do modelo (ex: 'gemini-2.5-flash-lite')."""
+        """Nome completo do modelo (ex: 'kr/claude-sonnet-4.5')."""
         ...
 
     @abstractmethod

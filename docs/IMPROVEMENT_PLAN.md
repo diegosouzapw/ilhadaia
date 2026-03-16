@@ -42,7 +42,6 @@ Perfis atuais:
 - `kimi-groq`
 - `gemini-flash`
 - `llama-groq`
-- `gemini-native`
 
 ### 3. Defaults operacionais alinhados
 

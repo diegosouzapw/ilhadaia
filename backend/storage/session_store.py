@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from runtime.profiles import get_profile
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -26,8 +28,8 @@ CREATE TABLE IF NOT EXISTS agent_scores (
     agent_id            TEXT NOT NULL,
     agent_name          TEXT NOT NULL,
     owner_id            TEXT DEFAULT '',
-    model               TEXT DEFAULT 'gemini',
-    provider            TEXT DEFAULT 'gemini',
+    model               TEXT DEFAULT 'kr/claude-sonnet-4.5',
+    provider            TEXT DEFAULT 'omnirouter',
     profile_id          TEXT DEFAULT 'default',
     ticks_alive         INTEGER DEFAULT 0,
     score_survival      REAL DEFAULT 0,
@@ -117,6 +119,7 @@ class SessionStore:
             )
         else:
             profile_id = getattr(agent, "profile_id", "default")
+            profile = get_profile(profile_id)
             self.conn.execute(
                 """INSERT INTO agent_scores
                    (session_id, agent_id, agent_name, owner_id, model, provider,
@@ -126,8 +129,8 @@ class SessionStore:
                 (
                     session_id, agent.id, agent.name,
                     getattr(agent, "owner_id", ""),
-                    getattr(agent, "model_name", "gemini"),
-                    getattr(agent, "provider", "gemini"),
+                    profile.model,
+                    profile.provider,
                     profile_id,
                     benchmark.get("ticks_survived", 0),
                     benchmark.get("score", 0.0),

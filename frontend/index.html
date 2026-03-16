@@ -77,6 +77,16 @@
         </div>
         
         <div id="chat-panel">
+            <div id="chat-panel-header">
+                <div>
+                    <h3>💬 Chat da Ilha</h3>
+                    <p>Conversa e decisões ao vivo dos agentes.</p>
+                </div>
+                <div class="chat-panel-shortcuts">
+                    <a class="chat-shortcut" href="dashboard.html" title="Abrir dashboard analítico">📊 Dashboard</a>
+                    <a class="chat-shortcut" href="models.html" title="Abrir painel de modelos">🤖 Modelos</a>
+                </div>
+            </div>
             <div id="chat-filters">
                 <button class="filter-btn active" onclick="setChatFilter('all')">Todos</button>
                 <button class="filter-btn" id="filter-joao" onclick="setChatFilter('João')" style="display:none">João</button>
@@ -89,6 +99,92 @@
             </div>
             <ul id="chat-messages"></ul>
         </div>
+
+        <aside id="right-sidebar">
+            <div id="shortcut-panel" class="side-widget">
+                <div class="sidebar-card-header">
+                    <h3>🧭 Atalhos</h3>
+                    <span>navegacao rapida</span>
+                </div>
+                <div class="shortcut-grid">
+                    <a class="sidebar-shortcut" href="dashboard.html" title="Abrir dashboard analítico">
+                        <span class="shortcut-icon">📊</span>
+                        <span class="shortcut-copy">
+                            <strong>Dashboard</strong>
+                            <small>benchmark e histórico</small>
+                        </span>
+                    </a>
+                    <a class="sidebar-shortcut" href="models.html" title="Abrir painel de modelos e agentes">
+                        <span class="shortcut-icon">🤖</span>
+                        <span class="shortcut-copy">
+                            <strong>Modelos</strong>
+                            <small>perfis e cadastros</small>
+                        </span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- ═══ T16: HUD de Benchmark ═══════════════════════════════════════ -->
+            <div id="benchmark-hud" class="side-widget">
+                <div id="benchmark-drag-handle">
+                    <span class="bm-drag-icon">🏆</span>
+                    <h3>Benchmark ao Vivo</h3>
+                    <button class="bm-collapse-btn" onclick="toggleBenchmarkCollapse()" title="Minimizar/Expandir">▾</button>
+                </div>
+                <div id="benchmark-hud-body">
+                    <table id="benchmark-table">
+                        <thead>
+                            <tr>
+                                <th>Agente</th>
+                                <th>Modelo</th>
+                                <th>Tokens</th>
+                                <th>Score</th>
+                                <th>HP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="benchmark-body">
+                            <tr><td colspan="5" style="text-align:center;color:#666">Aguardando dados...</td></tr>
+                        </tbody>
+                    </table>
+                    <div id="benchmark-session" style="margin-top:8px; font-size:10px; color:#666; border-top:1px solid #333; padding-top:4px;">
+                        Session: <span id="session-id-display">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ T16: Timeline de eventos ════════════════════════════════════ -->
+            <div id="event-timeline" class="side-widget">
+                <div class="sidebar-card-header">
+                    <h3>📜 Eventos</h3>
+                    <span>linha do tempo</span>
+                </div>
+                <ul id="event-list"></ul>
+            </div>
+
+            <!-- ═══ T13/T16: Painel de Replay ════════════════════════════════════ -->
+            <div id="replay-panel" class="side-widget">
+                <div class="sidebar-card-header">
+                    <h3>▶ Replay</h3>
+                    <span>sessoes recentes</span>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+                    <select id="session-select" style="flex:1; background:#222; color:#e0e0e0; border:1px solid #444; border-radius:4px; padding:4px;"></select>
+                    <button class="replay-btn" onclick="loadReplay()">Carregar</button>
+                </div>
+                <div id="replay-controls" style="display:none;">
+                    <input type="range" id="replay-slider" min="0" max="0" value="0"
+                           oninput="seekReplay(this.value)" style="width:100%; margin:6px 0;">
+                    <div style="display:flex; gap:6px; align-items:center; font-size:12px;">
+                        <span id="replay-tick-label" style="color:#4fc3f7; font-family:monospace;">Tick: 0</span>
+                        <button class="replay-btn" id="play-btn" onclick="startReplay()">▶ Play</button>
+                        <button class="replay-btn" onclick="pauseReplay()">⏸</button>
+                        <button class="replay-btn" onclick="stopReplay()">⏹</button>
+                        <span style="margin-left:auto; color:#aaa;"><span id="replay-frame-count">0</span> frames</span>
+                    </div>
+                </div>
+                <p id="replay-status" style="font-size:11px; color:#888; margin:4px 0;">Selecione uma sessão para replay.</p>
+            </div>
+        </aside>
     </div>
     
     <!-- Canvas container for Three.js -->
@@ -115,55 +211,6 @@
         </div>
     </div>
 
-    <!-- ═══ T16: HUD de Benchmark ═══════════════════════════════════════ -->
-    <div id="benchmark-hud">
-        <div id="benchmark-drag-handle">
-            <span class="bm-drag-icon">⠿</span>
-            <h3>🏆 BENCHMARK AO VIVO</h3>
-            <button class="bm-collapse-btn" onclick="toggleBenchmarkCollapse()" title="Minimizar/Expandir">▾</button>
-        </div>
-        <div id="benchmark-hud-body">
-            <table id="benchmark-table">
-                <thead>
-                    <tr>
-                        <th>Agente</th>
-                        <th>Modelo</th>
-                        <th>Tokens</th>
-                        <th>Score</th>
-                        <th>HP</th>
-                    </tr>
-                </thead>
-                <tbody id="benchmark-body">
-                    <tr><td colspan="5" style="text-align:center;color:#666">Aguardando dados...</td></tr>
-                </tbody>
-            </table>
-            <div id="benchmark-session" style="margin-top:8px; font-size:10px; color:#666; border-top:1px solid #333; padding-top:4px;">
-                Session: <span id="session-id-display">-</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══ T13/T16: Painel de Replay ════════════════════════════════════ -->
-    <div id="replay-panel">
-        <h3>▶ Replay de Sessões</h3>
-        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-            <select id="session-select" style="flex:1; background:#222; color:#e0e0e0; border:1px solid #444; border-radius:4px; padding:4px;"></select>
-            <button class="replay-btn" onclick="loadReplay()">Carregar</button>
-        </div>
-        <div id="replay-controls" style="display:none;">
-            <input type="range" id="replay-slider" min="0" max="0" value="0"
-                   oninput="seekReplay(this.value)" style="width:100%; margin:6px 0;">
-            <div style="display:flex; gap:6px; align-items:center; font-size:12px;">
-                <span id="replay-tick-label" style="color:#4fc3f7; font-family:monospace;">Tick: 0</span>
-                <button class="replay-btn" id="play-btn" onclick="startReplay()">▶ Play</button>
-                <button class="replay-btn" onclick="pauseReplay()">⏸</button>
-                <button class="replay-btn" onclick="stopReplay()">⏹</button>
-                <span style="margin-left:auto; color:#aaa;"><span id="replay-frame-count">0</span> frames</span>
-            </div>
-        </div>
-        <p id="replay-status" style="font-size:11px; color:#888; margin:4px 0;">Selecione uma sessão para replay.</p>
-    </div>
-
     <!-- ═══ T16: Modal de detalhe do agente ═════════════════════════════ -->
     <div id="agent-modal" class="hidden">
         <div id="agent-modal-content">
@@ -173,12 +220,6 @@
         </div>
     </div>
 
-    <!-- ═══ T16: Timeline de eventos ════════════════════════════════════ -->
-    <div id="event-timeline">
-        <h3>📜 Eventos</h3>
-        <ul id="event-list"></ul>
-    </div>
-
     <div id="settings-modal" class="hidden-modal">
         <div class="modal-content">
             <h3>⚙️ Catálogo de IA</h3>
@@ -186,7 +227,7 @@
                 PRESET SALVO: <span id="display-provider">-</span> | <span id="display-model">-</span>
             </div>
             <p id="settings-note">
-                Perfis ativos continuam sendo geridos em <strong>Modelos</strong>. Esta tela salva apenas o preset auxiliar da UI e consulta dinamica de modelos por provider.
+                Perfis ativos continuam sendo geridos em <strong>Modelos</strong>. Esta tela salva apenas o preset auxiliar da UI e consulta dinamica de modelos por endpoint OpenAI-compatible.
             </p>
             <div class="settings-group">
                 <label for="admin-token">Admin Token:</label>
@@ -195,7 +236,6 @@
             <div class="settings-group">
                 <label for="ai-provider">Provider:</label>
                 <select id="ai-provider" onchange="toggleOmniFields(this.value)">
-                    <option value="gemini">Google Gemini</option>
                     <option value="omnirouter">OmniRoute / OpenAI-compatible</option>
                 </select>
             </div>
@@ -205,7 +245,7 @@
             </div>
             <div id="omni-fields" style="display: none;">
                 <div class="settings-group">
-                    <label for="omniroute-url">Base URL do provider:</label>
+                    <label for="omniroute-url">Base URL do endpoint:</label>
                     <input type="text" id="omniroute-url" placeholder="http://192.168.0.15:20128/v1">
                 </div>
             </div>

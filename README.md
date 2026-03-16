@@ -62,7 +62,7 @@ OMNIROUTER_URL=http://192.168.0.15:20128/v1
 OMNIROUTER_API_KEY=omniroute-local
 ALLOWED_ORIGINS=*
 
-# Opcional: so necessario para o perfil gemini-native
+# Exemplo opcional de credencial externa. Nao faz parte do fluxo default.
 GEMINI_API_KEY=sua_chave_gemini_aqui
 ```
 
@@ -71,8 +71,8 @@ Observacoes importantes:
 - `POST /agents/register` agora usa `claude-kiro` como default quando `profile_id` nao e enviado.
 - `get_profile()` tambem faz fallback para `claude-kiro`.
 - Os quatro NPCs iniciais da ilha usam esta rotacao gratuita: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`.
-- `gemini-native` continua disponivel, mas depende de `GEMINI_API_KEY`.
 - por compatibilidade com a `main`, o backend tambem aceita `OMNIROUTE_API_KEY` como alias legado de `OMNIROUTER_API_KEY`.
+- por compatibilidade com outros endpoints OpenAI-compatible, o backend tambem aceita `OPENAI_BASE_URL` e `OPENAI_API_KEY` como aliases opcionais.
 
 ## Interfaces web
 
@@ -88,7 +88,7 @@ Nao abra os arquivos `.html` por `file://`. O fluxo correto desta branch e servi
 
 ## Perfis disponiveis
 
-Hoje o projeto tem 8 perfis builtin.
+Hoje o projeto tem 7 perfis builtin.
 
 | Perfil | Provider | Modelo | Uso principal |
 | --- | --- | --- | --- |
@@ -99,7 +99,6 @@ Hoje o projeto tem 8 perfis builtin.
 | `kimi-groq` | OmniRoute | `groq/moonshotai/kimi-k2-instruct` | alternativa via Groq |
 | `gemini-flash` | OmniRoute | `gc/gemini-2.5-flash` | Gemini via gateway |
 | `llama-groq` | OmniRoute | `groq/llama-3.3-70b-versatile` | inferencia rapida |
-| `gemini-native` | Gemini | `gemini-2.5-flash-lite` | uso direto com API key |
 
 A tela `models.html` consome `GET /profiles` e sincroniza automaticamente a lista de perfis com o backend, inclusive no formulario de registro.
 

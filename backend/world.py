@@ -81,7 +81,7 @@ class World:
                     settings = json.load(f)
                     self.ai_interval = settings.get("ai_interval", 5)
                     self.player_count = settings.get("player_count", 4)
-                    self.ai_provider = settings.get("ai_provider", "omnirouter")
+                    self.ai_provider = "omnirouter"
                     self.ai_model = settings.get("ai_model", "kr/claude-sonnet-4.5")
                     self.omniroute_url = settings.get("omniroute_url", "http://192.168.0.15:20128/v1")
         except Exception as e:

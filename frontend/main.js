@@ -108,7 +108,7 @@ const settingsModal = document.getElementById('settings-modal');
 const omniFields = document.getElementById('omni-fields');
 
 function normalizeProvider(provider) {
-    return (provider || '').toLowerCase() === 'gemini' ? 'gemini' : 'omnirouter';
+    return 'omnirouter';
 }
 
 async function fetchAISettings() {
@@ -178,7 +178,7 @@ function toggleOmniFields(provider, skipFetch = false) {
 function updateHeaderInfo(provider, model) {
     const pEl = document.getElementById('display-provider');
     const mEl = document.getElementById('display-model');
-    if (pEl) pEl.innerText = normalizeProvider(provider).toUpperCase();
+    if (pEl) pEl.innerText = 'OMNIROUTER / OPENAI-COMPATIBLE';
     if (mEl) mEl.innerText = model;
 }
 

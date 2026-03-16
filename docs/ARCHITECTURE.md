@@ -28,7 +28,7 @@ Browser
             +--> SessionStore / MemoryStore / ReplayStore / DecisionLog / WebhookManager
             |
             v
-      Gemini API ou providers OpenAI-compatible via OmniRoute
+      Endpoint OpenAI-compatible (OmniRoute por default)
 ```
 
 ## Componentes principais
@@ -80,12 +80,13 @@ Fallback atual:
 
 ### `backend/runtime/profiles.py`
 
-Catalogo builtin de 8 perfis.
+Catalogo builtin de 7 perfis.
 
-Dois grupos existem hoje:
+Todos os perfis usam `provider="omnirouter"` e compartilham o mesmo eixo:
 
-- `provider="omnirouter"`: todos usam o mesmo `OMNIROUTER_URL`, mudando apenas `model`
-- `provider="gemini"`: usa `GEMINI_API_KEY` diretamente (`gemini-native`)
+- `OMNIROUTER_URL` como base default
+- `OMNIROUTER_API_KEY` como chave default
+- aliases opcionais `OPENAI_BASE_URL` e `OPENAI_API_KEY` para outros endpoints OpenAI-compatible
 
 ### `backend/storage/*`
 
