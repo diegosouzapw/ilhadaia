@@ -12,6 +12,7 @@ BBBia e um simulador de sobrevivencia social com benchmark de modelos de IA. O b
 - catalogo de perfis migrado para um setup free-first via OmniRoute
 - nova tela `models.html` para testes de modelos e registro de agentes
 - HUD de benchmark arrastavel e recolhivel na ilha
+- menu auxiliar na ilha para consultar catalogo dinamico de modelos e salvar preset de provider/modelo
 - artefatos de runtime removidos do git: banco SQLite, WAL, replays, logs e JSONs de estado
 
 ## Stack atual
@@ -21,6 +22,14 @@ BBBia e um simulador de sobrevivencia social com benchmark de modelos de IA. O b
 - Persistencia: SQLite + NDJSON de decisoes e replay
 - Frontend: paginas estaticas em HTML/CSS/JS servidas por `StaticFiles`
 - Ambiente recomendado: Python 3.12+
+
+Importante: a fonte de verdade do runtime continua sendo o sistema de `profiles`. O menu de settings herdado da `main` foi mantido como camada auxiliar para:
+
+- listar modelos dinamicamente por provider
+- salvar um preset/catalogo default da UI
+- inspecionar URL do provider OpenAI-compatible
+
+Ele nao substitui `profile_id`, nem o fluxo de decisao baseado em `runtime/thinker.py`.
 
 ## Setup rapido
 
@@ -63,6 +72,7 @@ Observacoes importantes:
 - `get_profile()` tambem faz fallback para `claude-kiro`.
 - Os quatro NPCs iniciais da ilha usam esta rotacao gratuita: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`.
 - `gemini-native` continua disponivel, mas depende de `GEMINI_API_KEY`.
+- por compatibilidade com a `main`, o backend tambem aceita `OMNIROUTE_API_KEY` como alias legado de `OMNIROUTER_API_KEY`.
 
 ## Interfaces web
 
@@ -92,6 +102,14 @@ Hoje o projeto tem 8 perfis builtin.
 | `gemini-native` | Gemini | `gemini-2.5-flash-lite` | uso direto com API key |
 
 A tela `models.html` consome `GET /profiles` e sincroniza automaticamente a lista de perfis com o backend, inclusive no formulario de registro.
+
+Na `index.html`, o botao de engrenagem agora consome:
+
+- `GET /settings/ai`
+- `POST /settings/ai`
+- `GET /models`
+
+Esses endpoints existem como apoio de catalogo/default da UI. O runtime ativo da ilha continua vindo dos perfis atribuidos a cada agente.
 
 ## Resetar estado local
 

@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -29,6 +30,12 @@ except ImportError:
     RateLimitExceeded = None
     RATE_LIMIT_ENABLED = False
 
+# ── Configuração ──────────────────────────────────────────────────────────────
+load_dotenv()
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123")
+AUTHORIZED_IDS = [id.strip() for id in os.getenv("AUTHORIZED_IDS", "777").split(",") if id.strip()]
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 from world import World
 from agent import Agent
 from storage.decision_log import DecisionLog
@@ -37,14 +44,13 @@ from storage.replay_store import ReplayStore
 from storage.memory_store import MemoryStore           # T22
 from storage.webhook_manager import WebhookManager     # T24
 from runtime.thinker import Thinker
-from runtime.profiles import list_profiles, get_profile, BUILTIN_PROFILES
+from runtime.profiles import (
+    list_profiles,
+    get_profile,
+    BUILTIN_PROFILES,
+    OMNIROUTER_URL,
+)
 from runtime.tournament_runner import TournamentRunner  # T20
-
-# ── Configuração ──────────────────────────────────────────────────────────────
-load_dotenv()
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123")
-AUTHORIZED_IDS = [id.strip() for id in os.getenv("AUTHORIZED_IDS", "777").split(",") if id.strip()]
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("BBB_IA")
@@ -95,6 +101,39 @@ class TournamentConfig(BaseModel):
     allowed_profiles: list[str] = []
     reset_on_finish: bool = True
 
+
+class AISettingsRequest(BaseModel):
+    ai_provider: str
+    ai_model: str
+    omniroute_url: str
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    if (provider or "").strip().lower() == "gemini":
+        return "gemini"
+    return "omnirouter"
+
+
+def _normalize_omni_base_url(url: Optional[str]) -> str:
+    value = (url or OMNIROUTER_URL).strip().rstrip("/")
+    if value.endswith("/chat/completions"):
+        value = value[: -len("/chat/completions")]
+    return value or OMNIROUTER_URL
+
+
+def _catalog_api_key() -> str:
+    return (
+        os.getenv("OMNIROUTER_API_KEY")
+        or os.getenv("OMNIROUTE_API_KEY")
+        or "omniroute-local"
+    )
+
+
+def _default_model_for_provider(provider: str) -> str:
+    if provider == "gemini":
+        return get_profile("gemini-native").model
+    return get_profile("claude-kiro").model
+
 # ── Auth ───────────────────────────────────────────────────────────────────────
 async def verify_admin_token(x_admin_token: str = Header(None)):
     if x_admin_token != ADMIN_TOKEN:
@@ -120,7 +159,13 @@ async def lifespan(app: FastAPI):
         )
 
     world.set_ai_decider(_thinker_decider)
-    _world_settings = {"ai_interval": world.ai_interval, "player_count": world.player_count}
+    _world_settings = {
+        "ai_interval": world.ai_interval,
+        "player_count": world.player_count,
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
     _current_session_id = session_store.create_session(_world_settings)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
@@ -300,7 +345,13 @@ async def reset_game(player_count: int = 4):
                 memory_store.save(agent)
         replay_store.force_snapshot(world.ticks, world.get_state())
         session_store.end_session(_current_session_id, None, None)
-    _world_settings = {"ai_interval": world.ai_interval, "player_count": world.player_count}
+    _world_settings = {
+        "ai_interval": world.ai_interval,
+        "player_count": world.player_count,
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
     _current_session_id = session_store.create_session(_world_settings)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
@@ -314,6 +365,126 @@ async def set_ai_interval(interval: int):
     world.ai_interval = max(0, interval)
     world._save_history()
     return {"status": "Interval updated", "new_interval": world.ai_interval}
+
+
+@app.get("/settings/ai")
+async def get_ai_settings():
+    return {
+        "scope": "catalog_default",
+        "note": "Perfis por agente continuam sendo a fonte de verdade. Esta configuracao salva apenas o preset/catalogo auxiliar da UI.",
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
+
+
+@app.post("/settings/ai", dependencies=[Depends(verify_admin_token)])
+async def set_ai_settings(req: AISettingsRequest):
+    provider = _normalize_provider(req.ai_provider)
+    world.ai_provider = provider
+    world.ai_model = (req.ai_model or "").strip() or _default_model_for_provider(provider)
+    world.omniroute_url = _normalize_omni_base_url(req.omniroute_url)
+    world._save_history()
+    logger.info(
+        "AI catalog settings updated: provider=%s model=%s url=%s",
+        world.ai_provider,
+        world.ai_model,
+        world.omniroute_url,
+    )
+    return {
+        "status": "AI catalog settings updated",
+        "scope": "catalog_default",
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
+
+
+@app.get("/models")
+async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
+    """Lista modelos para o menu auxiliar da UI sem substituir o fluxo de profiles."""
+    target_provider = _normalize_provider(provider or world.ai_provider)
+    target_url = _normalize_omni_base_url(url or world.omniroute_url)
+
+    final_models: list[dict] = []
+    seen_ids: set[str] = set()
+
+    def add_model(model_id: str, name: str, source: str = "curated") -> None:
+        if model_id and model_id not in seen_ids:
+            final_models.append({"id": model_id, "name": name, "source": source})
+            seen_ids.add(model_id)
+
+    builtin_profiles = [
+        p for p in BUILTIN_PROFILES.values()
+        if _normalize_provider(p.provider) == target_provider
+    ]
+    for profile in builtin_profiles:
+        add_model(profile.model, f"{profile.profile_id} ({profile.model})", "builtin_profile")
+
+    if target_provider == "gemini":
+        curated_gemini = [
+            ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
+            ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+            ("gemini-2.0-flash", "Gemini 2.0 Flash"),
+            ("gemini-1.5-pro", "Gemini 1.5 Pro"),
+        ]
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                from google import genai
+
+                client = genai.Client(api_key=gemini_key)
+                for model in client.models.list():
+                    model_id = model.name.replace("models/", "")
+                    lowered = model_id.lower()
+                    if (
+                        (model_id.startswith("gemini") or model_id.startswith("gemma"))
+                        and all(x not in lowered for x in ("embedding", "vision", "image", "aqa"))
+                    ):
+                        add_model(model_id, getattr(model, "display_name", model_id), "dynamic")
+            except Exception as exc:
+                logger.error("Error fetching dynamic Gemini models: %s", exc)
+
+        for model_id, name in curated_gemini:
+            add_model(model_id, name)
+    else:
+        curated_omni = [
+            ("gpt-4o", "GPT-4o"),
+            ("gpt-4o-mini", "GPT-4o Mini"),
+            ("claude-3-5-sonnet", "Claude 3.5 Sonnet"),
+            ("claude-3-5-haiku", "Claude 3.5 Haiku"),
+            ("qwen-2.5-72b-instruct", "Qwen 2.5 72B"),
+            ("meta-llama/llama-3.1-70b-instruct", "Llama 3.1 70B"),
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"{target_url}/models",
+                    headers={"Authorization": f"Bearer {_catalog_api_key()}"},
+                )
+                if response.status_code == 200:
+                    payload = response.json()
+                    for model in payload.get("data", []) if isinstance(payload, dict) else []:
+                        model_id = model.get("id")
+                        if model_id:
+                            add_model(model_id, model.get("name", model_id), "dynamic")
+                else:
+                    logger.warning("Failed to fetch OmniRouter models from %s: %s", target_url, response.status_code)
+        except Exception as exc:
+            logger.error("Error proxying OmniRouter models from %s: %s", target_url, exc)
+
+        for model_id, name in curated_omni:
+            add_model(model_id, name)
+
+    if not final_models:
+        add_model(_default_model_for_provider(target_provider), "Padrao do provider", "default")
+
+    return {
+        "scope": "catalog",
+        "provider": target_provider,
+        "base_url": target_url if target_provider == "omnirouter" else None,
+        "models": final_models,
+    }
 
 # ── Sessions, Scoreboard & Replay ─────────────────────────────────────────────
 

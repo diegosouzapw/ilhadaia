@@ -19,6 +19,7 @@ import json
 import tempfile
 import sqlite3
 import pytest
+import importlib
 
 
 # ══════════════════════════════════════════════════════════════
@@ -345,8 +346,9 @@ class TestSessionStore:
 class TestProfilesEndpoint:
     def test_profiles_endpoint_returns_profiles(self):
         from fastapi.testclient import TestClient
-        from main import app
+        import main
 
+        app = importlib.reload(main).app
         with TestClient(app) as client:
             resp = client.get("/profiles")
             assert resp.status_code == 200
@@ -354,3 +356,54 @@ class TestProfilesEndpoint:
             assert "profiles" in data
             assert isinstance(data["profiles"], list)
             assert len(data["profiles"]) > 0
+
+
+class TestAISettingsEndpoints:
+    def test_get_ai_settings_exposes_catalog_scope(self):
+        from fastapi.testclient import TestClient
+        import main
+
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/settings/ai")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["scope"] == "catalog_default"
+            assert data["ai_provider"] in ("gemini", "omnirouter")
+            assert "note" in data
+
+    def test_post_ai_settings_updates_catalog_preset(self):
+        from fastapi.testclient import TestClient
+        import main
+
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post(
+                "/settings/ai",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={
+                    "ai_provider": "omnirouter",
+                    "ai_model": "kr/claude-sonnet-4.5",
+                    "omniroute_url": "http://localhost:20128/v1/chat/completions",
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["scope"] == "catalog_default"
+            assert data["ai_provider"] == "omnirouter"
+            assert data["omniroute_url"] == "http://localhost:20128/v1"
+
+    def test_models_endpoint_returns_catalog_list(self):
+        from fastapi.testclient import TestClient
+        import main
+
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/models?provider=gemini")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["scope"] == "catalog"
+            assert data["provider"] == "gemini"
+            assert isinstance(data["models"], list)
+            assert len(data["models"]) > 0

@@ -25,10 +25,18 @@ class AgentProfile:
 
 # ── Configuração central do OmniRoute ──────────────────────────────────────────
 # Lê do .env — fallback para o endereço local padrão
-OMNIROUTER_URL = os.getenv("OMNIROUTER_URL", "http://192.168.0.15:20128/v1")
+OMNIROUTER_URL = (
+    os.getenv("OMNIROUTER_URL")
+    or os.getenv("OMNIROUTE_URL")
+    or "http://192.168.0.15:20128/v1"
+)
 
 # ── Chave de API do OmniRoute (qualquer string serve como proxy local) ─────────
-OMNIROUTER_API_KEY = os.getenv("OMNIROUTER_API_KEY", "omniroute-local")
+OMNIROUTER_API_KEY = (
+    os.getenv("OMNIROUTER_API_KEY")
+    or os.getenv("OMNIROUTE_API_KEY")
+    or "omniroute-local"
+)
 
 
 # ── Perfis disponíveis ──────────────────────────────────────────────────────────
