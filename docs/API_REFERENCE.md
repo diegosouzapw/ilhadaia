@@ -204,8 +204,15 @@ Registra um webhook para eventos críticos.
 }
 ```
 
-### `GET /webhooks`
-Lista webhooks registrados (admin).
+### `GET /webhooks/{owner_id}`  (admin)
+Lista webhooks registrados para um `owner_id` específico.
+
+### `DELETE /webhooks/{webhook_id}`  (admin)
+Remove um webhook registrado. Requer o `owner_id` na query:
+`DELETE /webhooks/{webhook_id}?owner_id=<OWNER_ID>`.
+
+### `POST /webhooks/test/{owner_id}`  (admin)
+Dispara um evento de teste para os webhooks associados ao `owner_id` informado.
 
 ---
 
