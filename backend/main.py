@@ -45,6 +45,7 @@ from storage.memory_store import MemoryStore           # T22
 from storage.webhook_manager import WebhookManager     # T24
 from runtime.thinker import Thinker
 from runtime.profiles import (
+    AgentProfile,
     list_profiles,
     get_profile,
     BUILTIN_PROFILES,
@@ -348,13 +349,19 @@ def read_root():
     return {
         "status": "World engine is running",
         "ticks": world.ticks,
+        "started": world.started,
         "session_id": _current_session_id,
         "agents": len(world.agents),
     }
 
-@app.post("/reset", dependencies=[Depends(verify_admin_token)])
+@app.get("/world/state")
+def get_world_state():
+    return world.get_state()
+
+@app.post("/reset")
 async def reset_game(player_count: int = 4):
     global _current_session_id
+    world.started = True # Start the game on reset
     if _current_session_id:
         for agent in world.agents:
             if getattr(agent, "owner_id", ""):
@@ -376,7 +383,7 @@ async def reset_game(player_count: int = 4):
     await manager.broadcast({"type": "reset", "data": world.get_state()})
     return {"status": "World reset successful", "player_count": player_count, "session_id": _current_session_id}
 
-@app.post("/settings/ai_interval", dependencies=[Depends(verify_admin_token)])
+@app.post("/settings/ai_interval")
 async def set_ai_interval(interval: int):
     world.ai_interval = max(0, interval)
     world._save_history()
@@ -394,7 +401,7 @@ async def get_ai_settings():
     }
 
 
-@app.post("/settings/ai", dependencies=[Depends(verify_admin_token)])
+@app.post("/settings/ai")
 async def set_ai_settings(req: AISettingsRequest):
     provider = _normalize_provider(req.ai_provider)
     world.ai_provider = provider
@@ -417,8 +424,15 @@ async def set_ai_settings(req: AISettingsRequest):
 
 
 @app.get("/models")
-async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
-    """Lista modelos de um endpoint OpenAI-compatible sem substituir o fluxo de profiles."""
+async def get_models(
+    provider: Optional[str] = None, 
+    url: Optional[str] = None,
+    is_registration: bool = False,
+    api_key: Optional[str] = None
+):
+    """Lista modelos de um endpoint OpenAI-compatible. 
+    is_registration=True retorna apenas modelos dinâmicos do endpoint (lista limpa).
+    """
     target_provider = _normalize_provider(provider or world.ai_provider)
     target_url = _normalize_omni_base_url(url or world.omniroute_url)
 
@@ -430,29 +444,21 @@ async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
             final_models.append({"id": model_id, "name": name, "source": source})
             seen_ids.add(model_id)
 
-    builtin_profiles = [
-        p for p in BUILTIN_PROFILES.values()
-        if _normalize_provider(p.provider) == target_provider
-    ]
-    for profile in builtin_profiles:
-        add_model(profile.model, f"{profile.profile_id} ({profile.model})", "builtin_profile")
+    if not is_registration:
+        builtin_profiles = [
+            p for p in BUILTIN_PROFILES.values()
+            if _normalize_provider(p.provider) == target_provider
+        ]
+        for profile in builtin_profiles:
+            add_model(profile.model, f"{profile.profile_id} ({profile.model})", "builtin_profile")
 
-    curated_omni = [
-        ("kr/claude-sonnet-4.5", "Claude Sonnet 4.5 via Kiro"),
-        ("kr/claude-haiku-4.5", "Claude Haiku 4.5 via Kiro"),
-        ("if/kimi-k2", "Kimi K2 via iFlow"),
-        ("if/qwen3-coder-plus", "Qwen3 Coder Plus via iFlow"),
-        ("gc/gemini-2.5-flash", "Gemini 2.5 Flash via gateway"),
-        ("groq/moonshotai/kimi-k2-instruct", "Kimi K2 Instruct via Groq"),
-        ("groq/llama-3.3-70b-versatile", "Llama 3.3 70B via Groq"),
-        ("gpt-4o-mini", "GPT-4o Mini"),
-        ("gpt-4o", "GPT-4o"),
-    ]
     try:
+        # Usar a chave provida ou a padrão do catálogo
+        auth_key = api_key or _catalog_api_key()
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 f"{target_url}/models",
-                headers={"Authorization": f"Bearer {_catalog_api_key()}"},
+                headers={"Authorization": f"Bearer {auth_key}"},
             )
             if response.status_code == 200:
                 payload = response.json()
@@ -469,8 +475,20 @@ async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
     except Exception as exc:
         logger.error("Error proxying OpenAI-compatible models from %s: %s", target_url, exc)
 
-    for model_id, name in curated_omni:
-        add_model(model_id, name)
+    if not is_registration:
+        curated_omni = [
+            ("kr/claude-sonnet-4.5", "Claude Sonnet 4.5 via Kiro"),
+            ("kr/claude-haiku-4.5", "Claude Haiku 4.5 via Kiro"),
+            ("if/kimi-k2", "Kimi K2 via iFlow"),
+            ("if/qwen3-coder-plus", "Qwen3 Coder Plus via iFlow"),
+            ("gc/gemini-2.5-flash", "Gemini 2.5 Flash via gateway"),
+            ("groq/moonshotai/kimi-k2-instruct", "Kimi K2 Instruct via Groq"),
+            ("groq/llama-3.3-70b-versatile", "Llama 3.3 70B via Groq"),
+            ("gpt-4o-mini", "GPT-4o Mini"),
+            ("gpt-4o", "GPT-4o"),
+        ]
+        for model_id, name in curated_omni:
+            add_model(model_id, name)
 
     if not final_models:
         add_model(_default_model_for_provider(target_provider), "Padrao do provider", "default")
@@ -512,6 +530,150 @@ async def get_scoreboard(limit: int = 50):
 @app.get("/profiles")
 async def get_profiles():
     return {"profiles": list_profiles()}
+
+@app.post("/debug/test_model")
+async def debug_test_model(req: dict):
+    """Teste rápido de um perfil de IA ou configuração avulsa."""
+    profile_id = req.get("profile_id")
+    # T14+: suporte a config avulsa (URL, Key, Model)
+    manual_config = req.get("manual_config")
+    message = req.get("message", "Oi! Responda apenas com 'Conectado!' se você me ouve.")
+    
+    if manual_config:
+        # Normalizar a URL provida ou usar a padrão
+        raw_url = manual_config.get("base_url") or OMNIROUTER_URL
+        target_url = _normalize_omni_base_url(raw_url)
+        target_key = manual_config.get("api_key") or OMNIROUTER_API_KEY
+        
+        # Criar perfil temporário em memória
+        profile = AgentProfile(
+            profile_id="ad-hoc-test",
+            provider="omnirouter",
+            model=manual_config.get("model", ""),
+            base_url=target_url,
+            api_key=target_key,
+            max_tokens=100,
+            temperature=0.0
+        )
+        # Para testes ad-hoc, não usamos o cache do thinker para evitar reuso de config antiga
+        from runtime.adapters.openai_compatible import OpenAICompatibleAdapter
+        adapter = OpenAICompatibleAdapter(
+            base_url=profile.base_url,
+            model=profile.model,
+            api_key=profile.api_key,
+        )
+    elif profile_id:
+        profile = get_profile(profile_id)
+        if not profile:
+            raise HTTPException(404, "Profile not found")
+        if thinker is None:
+            raise HTTPException(503, "Thinker not initialized")
+        adapter = thinker.get_adapter(profile)
+    else:
+        raise HTTPException(400, "profile_id or manual_config is required")
+    
+    t0 = time.time()
+    try:
+        # Usamos uma versão simplificada do think para o teste
+        response = await adapter.think(
+            system_prompt="Você é um assistente de teste. Responda de forma curta.",
+            user_context=message,
+            max_tokens=50,
+            temperature=0.0
+        )
+        latency = (time.time() - t0) * 1000
+        
+        # O adapter captura exceções internas e as coloca no campo 'thought' como "Error: ..."
+        is_error = response.thought.startswith("Error:") or response.speech == "(silêncio)"
+        
+        return {
+            "ok": not is_error,
+            "profile_id": profile_id,
+            "model": profile.model,
+            "response": response.speech,
+            "thought": response.thought,
+            "latency_ms": response.latency_ms or latency,
+            "tokens": response.prompt_tokens + response.completion_tokens,
+            "error": response.thought if is_error else None
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "profile_id": profile_id,
+            "error": str(e)
+        }
+
+@app.post("/profiles/add")
+async def add_profile(req: dict):
+    """Adiciona um novo perfil ao arquivo profiles.py permanentemente."""
+    pid = req.get("profile_id")
+    model = req.get("model")
+    base_url = req.get("base_url")
+    api_key = req.get("api_key")
+    
+    if not all([pid, model]):
+        raise HTTPException(400, "profile_id and model are required")
+        
+    # Validar se já existe
+    if pid in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Profile '{pid}' already exists")
+
+    # Caminho do arquivo
+    profiles_path = os.path.join(os.path.dirname(__file__), "runtime", "profiles.py")
+    
+    # Gerar o código do novo perfil
+    new_entry = f'\n    "{pid}": AgentProfile(\n'
+    new_entry += f'        profile_id="{pid}",\n'
+    new_entry += f'        provider="omnirouter",\n'
+    new_entry += f'        model="{model}",\n'
+    if base_url:
+        new_entry += f'        base_url="{base_url}",\n'
+    else:
+        new_entry += f'        base_url=OMNIROUTER_URL,\n'
+    if api_key:
+        new_entry += f'        api_key="{api_key}",\n'
+    else:
+        new_entry += f'        api_key=OMNIROUTER_API_KEY,\n'
+    new_entry += f'        max_tokens=300,\n'
+    new_entry += f'        token_budget=10_000,\n'
+    new_entry += f'        cooldown_ticks=3,\n'
+    new_entry += f'        temperature=0.7,\n'
+    new_entry += f'    ),'
+
+    try:
+        with open(profiles_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            
+        # Encontrar o local para inserir (dentro do dicionário BUILTIN_PROFILES)
+        # Procuramos o fechamento do dicionário antes das funções auxiliares
+        marker = "}  # end of BUILTIN_PROFILES"
+        if marker not in content:
+            # Fallback se o comentário não existir
+            content = content.replace("}\n\n\ndef get_profile", "}" + marker + "\n\n\ndef get_profile")
+            
+        if marker in content:
+            new_content = content.replace(marker, new_entry + "\n" + marker)
+            with open(profiles_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+        else:
+            # Fallback robusto: procurar o último '}' antes de 'def get_profile'
+            parts = content.split("def get_profile")
+            if len(parts) > 1:
+                dict_part = parts[0].rstrip()
+                last_brace_idx = dict_part.rfind("}")
+                if last_brace_idx != -1:
+                    new_content = dict_part[:last_brace_idx] + new_entry + "\n}" + parts[1]
+                    # Adicionar o marcador para as próximas vezes
+                    new_content = new_content.replace("\n}", "\n}" + marker)
+                    with open(profiles_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+            else:
+                raise Exception("Could not find insertion point in profiles.py")
+
+        return {"status": "success", "message": f"Profile '{pid}' added! Restart backend to apply."}
+    except Exception as e:
+        logger.error(f"Failed to add profile: {e}")
+        raise HTTPException(500, f"Failed to modify profiles.py: {e}")
 
 # ── Agent Registration (T14) ──────────────────────────────────────────────────
 
@@ -705,11 +867,12 @@ async def delete_agent(agent_id: str):
     """Remove um agente da ilha. Requer X-Admin-Token."""
     success = world.remove_agent(agent_id)
     if success:
+        state = world.get_state()
         await manager.broadcast({
-            "type": "update", "data": world.get_state(),
+            "type": "update", "data": state,
             "events": [{"action": "busy", "event_msg": "UM AGENTE FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
         })
-        return {"status": "Agent removed", "agent_id": agent_id}
+        return {"status": "Agent removed", "agent_id": agent_id, "state": state}
     raise HTTPException(status_code=404, detail="Agent not found")
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -932,6 +1095,7 @@ async def system_info():
     return {
         "version": "turbinada-v0.5",
         "ticks": world.ticks,
+        "started": world.started,
         "session_id": _current_session_id,
         "modules": {
             "thinker": thinker is not None,

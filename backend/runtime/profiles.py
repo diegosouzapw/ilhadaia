@@ -29,7 +29,7 @@ OMNIROUTER_URL = (
     os.getenv("OMNIROUTER_URL")
     or os.getenv("OMNIROUTE_URL")
     or os.getenv("OPENAI_BASE_URL")
-    or "http://192.168.0.15:20128/v1"
+    or "http://localhost:20128/v1"
 )
 
 # ── Chave de API do OmniRoute (qualquer string serve como proxy local) ─────────
@@ -144,7 +144,19 @@ BUILTIN_PROFILES: dict[str, AgentProfile] = {
         cooldown_ticks=2,
         temperature=0.8,
     ),
-}
+
+    "gemini-3.1-flash-lite-preview": AgentProfile(
+        profile_id="gemini-3.1-flash-lite-preview",
+        provider="omnirouter",
+        model="gemini/gemini-3.1-flash-lite-preview",
+        base_url="http://localhost:20128/v1",
+        api_key=OMNIROUTER_API_KEY,
+        max_tokens=300,
+        token_budget=10_000,
+        cooldown_ticks=3,
+        temperature=0.7,
+    ),
+}  # end of BUILTIN_PROFILES
 
 
 def get_profile(profile_id: str) -> AgentProfile:

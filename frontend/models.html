@@ -7,6 +7,7 @@
   <meta name="description" content="Gerencie perfis de IA, teste modelos e controle agentes na ilha inteligente BBBia."/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css">
   <style>
     :root {
       --bg:      #08090d;
@@ -261,17 +262,9 @@
     /* ── Separator ── */
     .sep { height: 1px; background: var(--border); margin: 20px 0; }
 
-    /* ── Toast ── */
-    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
-    .toast {
-      padding: 12px 18px; border-radius: 10px; font-size: .85rem; font-weight: 600;
-      animation: toastIn .3s ease; min-width: 240px;
-      background: var(--bg2); border: 1px solid var(--border);
-    }
-    .toast.ok  { border-color: var(--green); color: var(--green); }
-    .toast.err { border-color: var(--red); color: var(--red); }
-    .toast.info{ border-color: var(--accent); color: var(--accent); }
-    @keyframes toastIn { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: none; } }
+
+
+
 
     @media(max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
@@ -283,6 +276,19 @@
   </style>
 </head>
 <body>
+<div id="toasts" class="toast-container"></div>
+
+<!-- Confirmation Modal -->
+<div id="confirm-modal" class="hidden-modal" style="display: none;">
+  <div class="modal-content">
+    <h3 id="confirm-modal-title">⚠️ Confirmar</h3>
+    <p id="confirm-modal-message" style="font-size: 13px; margin: 15px 0; line-height: 1.5; color: #ccc;"></p>
+    <div class="modal-footer">
+      <button onclick="closeConfirmModal()">Cancelar</button>
+      <button class="primary-btn" id="confirm-modal-button" style="padding: 8px 16px; border-radius: 6px; cursor: pointer; border: none; background: #ffeb3b; color: black; font-weight: bold;">Confirmar</button>
+    </div>
+  </div>
+</div>
 
 <header>
   <div class="logo">
@@ -292,12 +298,13 @@
     </div>
   </div>
   <div class="nav-actions">
+
     <div class="status-pill offline" id="status-pill">
       <div class="status-dot"></div>
       <span id="status-text">Conectando...</span>
     </div>
     <nav style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:5px 10px;backdrop-filter:blur(6px)">
-      <a href="index.html"     style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
+      <a href="javascript:void(0)" onclick="goIsland()" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
       <a href="dashboard.html" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">📊 Dashboard</a>
       <a href="models.html"    style="text-decoration:none;color:#a78bfa;font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;background:rgba(124,111,255,.15)">🤖 Modelos</a>
     </nav>
@@ -310,7 +317,10 @@
   <!-- Sidebar: Profile List -->
   <aside class="sidebar">
     <div class="sidebar-section">
-      <div class="sidebar-title">Perfis Disponíveis</div>
+      <div class="sidebar-title" style="display:flex;justify-content:space-between;align-items:center">
+        Perfis Disponíveis
+        <button class="btn btn-primary btn-sm" onclick="switchTab('new-profile')" style="padding:2px 8px;font-size:10px">+</button>
+      </div>
       <div id="profile-list">
         <div style="color:var(--muted);font-size:.8rem;text-align:center;padding:20px">Carregando...</div>
       </div>
@@ -347,6 +357,7 @@
     <!-- Tabs -->
     <div class="tabs">
       <button class="tab active" id="tab-test"    onclick="switchTab('test')">🧪 Testar Modelos</button>
+      <button class="tab"        id="tab-new-profile" onclick="switchTab('new-profile')">✨ Novo Perfil</button>
       <button class="tab"        id="tab-agents"  onclick="switchTab('agents')">🤖 Agentes Ativos</button>
       <button class="tab"        id="tab-register" onclick="switchTab('register')">➕ Adicionar Agente</button>
       <button class="tab"        id="tab-profiles" onclick="switchTab('profiles')">⚙️ Ver Perfis</button>
@@ -374,12 +385,58 @@
           <div style="color:var(--muted);font-size:.85rem;padding:20px">Carregando perfis...</div>
         </div>
       </div>
-
       <div class="card">
         <div class="card-title" style="margin-bottom:12px">📝 Log de Testes</div>
         <div class="log-area" id="test-log">
           <div class="log-line log-info">Aguardando testes...</div>
         </div>
+      </div>
+    </div>
+    
+    <!-- TAB: New Profile -->
+    <div class="tab-content" id="tc-new-profile">
+      <div class="card" id="add-profile-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="dot" style="background:var(--accent2)"></span>
+            Adicionar Novo Perfil (Auto-Registro)
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>ID do Perfil (Único) *</label>
+            <input id="new-profile-id" type="text" placeholder="ex: o3-mini-kiro"/>
+          </div>
+          <div class="form-group">
+            <label>Provedor (Preset)</label>
+            <select id="new-provider-preset" onchange="applyProviderPreset(this.value)">
+                <option value="omnirouter">OmniRouter (Kiro/iFlow/Local)</option>
+                <option value="openai">OpenAI (Oficial)</option>
+                <option value="groq">Groq (API)</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="custom">Outro (OpenAI-Compatible)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>OpenAI-Compatible Base URL *</label>
+            <input id="new-base-url" type="text" value="http://localhost:20128/v1" placeholder="http://localhost:20128/v1" oninput="fetchModelsForRegistration()"/>
+          </div>
+          <div class="form-group">
+            <label>API Key (opcional se já estiver no .env do backend)</label>
+            <input id="new-api-key" type="password" placeholder="Opcional: usa a chave do backend se vazio" oninput="fetchModelsForRegistration()"/>
+          </div>
+          <div class="form-group">
+            <label>Selecionar Modelo (Dinâmico)</label>
+            <select id="new-model-select">
+                <option value="">Carregando do endpoint...</option>
+            </select>
+          </div>
+          <div class="form-group full" style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-primary" id="btn-test-new" onclick="testNewConfig()">🧪 Testar Configuração</button>
+            <button class="btn btn-green" id="btn-save-new" onclick="saveNewProfile()" style="display:none">💾 Salvar no profiles.py</button>
+          </div>
+        </div>
+        <div id="new-test-result" class="log-area" style="margin-top:15px; height:80px; display:none; border-style:dashed"></div>
       </div>
     </div>
 
@@ -476,10 +533,81 @@
   </main>
 </div>
 
-<!-- Toast container -->
-<div class="toast-container" id="toasts"></div>
+<!-- Custom Modals -->
+<div id="admin-prompt-modal" class="hidden-modal">
+  <div class="modal-content">
+      <h3>🔑 Admin Token</h3>
+      <p>Esta ação requer autorização.</p>
+      <div class="form-group" style="margin: 15px 0;">
+          <input type="password" id="admin-prompt-token" placeholder="Token do Admin" onkeyup="if(event.key === 'Enter') submitAdminPrompt()">
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:center; gap:10px;">
+          <button class="btn btn-outline" onclick="closeAdminPrompt()">Cancelar</button>
+          <button class="btn btn-primary" onclick="submitAdminPrompt()">Enviar</button>
+      </div>
+  </div>
+</div>
+
+<div id="confirm-modal" class="hidden-modal">
+  <div class="modal-content">
+      <h3 id="confirm-modal-title">⚠️ Confirmar</h3>
+      <p id="confirm-modal-message" style="margin: 15px 0;"></p>
+      <div class="modal-footer" style="display:flex; justify-content:center; gap:10px;">
+          <button class="btn btn-outline" onclick="closeConfirmModal()">Cancelar</button>
+          <button class="btn btn-primary" id="confirm-modal-button">Confirmar</button>
+      </div>
+  </div>
+</div>
 
 <script>
+// --- Admin & Confirm Logic ---
+let onAdminConfirm = null;
+let onConfirmCallback = null;
+const adminPromptModal = document.getElementById('admin-prompt-modal');
+const adminPromptInput = document.getElementById('admin-prompt-token');
+const confirmModal = document.getElementById('confirm-modal');
+const confirmModalTitle = document.getElementById('confirm-modal-title');
+const confirmModalMessage = document.getElementById('confirm-modal-message');
+const confirmModalBtn = document.getElementById('confirm-modal-button');
+
+function openAdminPrompt(callback) {
+    onAdminConfirm = callback;
+    adminPromptModal.style.display = 'flex';
+    adminPromptInput.value = "";
+    adminPromptInput.focus();
+}
+
+function closeAdminPrompt() {
+    adminPromptModal.style.display = 'none';
+    onAdminConfirm = null;
+}
+
+function submitAdminPrompt() {
+    const token = adminPromptInput.value.trim();
+    if (token) {
+        currentAdminToken = token;
+        if (onAdminConfirm) onAdminConfirm();
+        closeAdminPrompt();
+    }
+}
+
+function showConfirmModal(title, message, onConfirm) {
+    confirmModalTitle.innerText = title;
+    confirmModalMessage.innerText = message;
+    onConfirmCallback = onConfirm;
+    confirmModal.style.display = 'flex';
+    
+    confirmModalBtn.onclick = () => {
+        if (onConfirmCallback) onConfirmCallback();
+        closeConfirmModal();
+    };
+}
+
+function closeConfirmModal() {
+    confirmModal.style.display = 'none';
+    onConfirmCallback = null;
+}
+
 // ── API Config ────────────────────────────────────────────────────────────────
 const API = (() => {
   const host = window.location.hostname || 'localhost';
@@ -491,7 +619,7 @@ const API = (() => {
   return `http://${host}:${port}`;
 })();
 
-const ADMIN_TOKEN = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
+let currentAdminToken = 'dev_token_123';
 
 let _profiles = [];
 let _testResults = {};
@@ -500,6 +628,7 @@ let _testedCount = 0;
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   await refreshAll();
+  fetchModelsForRegistration(); // Carregar modelos iniciais para o form
   setInterval(refreshKPIs, 5000);
   watchRegisterForm();
 });
@@ -630,89 +759,89 @@ function renderTestCards() {
     </div>`).join('');
 }
 
-async function testModel(profileId) {
-  const profile = _profiles.find(p => p.profile_id === profileId);
-  if (!profile) return;
+async function registerAgent() {
+  const owner_id = document.getElementById('reg-owner').value;
+  const agent_name = document.getElementById('reg-name').value;
+  const persona = document.getElementById('reg-persona').value;
+  const profile_id = document.getElementById('reg-profile').value;
 
-  const card = document.getElementById(`tc-${profileId}`);
+  if (!owner_id || !agent_name || !persona) {
+    toast('err', 'Preencha os campos obrigatórios!');
+    return;
+  }
+
+  log('info', `Registrando agente ${agent_name}...`);
+  
+  try {
+    const res = await fetch(`${API}/agents/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner_id, agent_name, persona, profile_id })
+    });
+    
+    if (res.ok) {
+      toast('ok', `${agent_name} entrou na ilha!`);
+      loadAgents();
+    } else {
+      const err = await res.json();
+      toast('err', `Erro: ${err.detail}`);
+    }
+  } catch(e) {
+    toast('err', 'Erro de conexão!');
+  }
+}
+
+async function testModel(profileId) {
   const status = document.getElementById(`ts-${profileId}`);
   const resp = document.getElementById(`tr-${profileId}`);
   const meta = document.getElementById(`tm-${profileId}`);
+  const card = document.getElementById(`tc-${profileId}`);
 
-  card.className = 'test-card testing';
-  status.className = 'test-status running';
-  status.innerHTML = '<span class="spin"></span> Enviando chamada...';
-  resp.style.display = 'none';
-  meta.textContent = '';
-
-  log('info', `[${profileId}] Iniciando teste com modelo ${profile.model}...`);
-  const t0 = Date.now();
+  if (status) {
+    status.innerHTML = '<span class="spin"></span> Testando...';
+    status.className = 'test-status testing';
+  }
+  if (resp) resp.textContent = '';
+  if (meta) meta.textContent = '';
 
   try {
-    // Register a temp agent and immediately remove — or use a lightweight approach
-    // We test by registering an agent with this profile
-    const result = await fetch(`${API}/agents/register`, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+
+    const r = await fetch(`${API}/debug/test_model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        owner_id: `test_${Date.now()}`,
-        owner_name: 'ModelTester',
-        agent_name: `Test_${profileId.slice(0,10)}`,
-        persona: 'Diga apenas: "Modelo OK! Pronto para a ilha." Nada mais.',
-        profile_id: profileId,
-      })
+      body: JSON.stringify({ profile_id: profileId }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
+    
+    const data = await r.json();
 
-    const latency = Date.now() - t0;
+    _testedCount++;
+    _testResults[profileId] = data;
+    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
 
-    if (!result.ok) {
-      const err = await result.json().catch(() => ({ detail: result.statusText }));
-      throw new Error(err.detail || `HTTP ${result.status}`);
+    if (data.ok) {
+      status.textContent = '✅ Sucesso';
+      status.className = 'test-status ok';
+      resp.textContent = data.response || '(vazio)';
+      meta.textContent = `${Math.round(data.latency_ms)}ms · ${data.tokens} tokens · ${data.model}`;
+      log('ok', `Teste [${profileId}]: Sucesso (${Math.round(data.latency_ms)}ms)`);
+    } else {
+      status.textContent = '❌ Falha';
+      status.className = 'test-status err';
+      resp.textContent = data.error || 'Erro no modelo';
+      log('err', `Teste [${profileId}]: Falha - ${data.error || 'Sem resposta'}`);
     }
-
-    const data = await result.json();
-    const agentId = data.agent_id;
-
-    card.className = 'test-card success';
-    status.className = 'test-status ok';
-    status.textContent = `✅ Agente registrado com sucesso!`;
-    resp.textContent = `Agent ID: ${agentId}\nModelo: ${data.profile}\nLatência API: ${latency}ms`;
-    resp.style.display = 'block';
-    meta.textContent = `Latência: ${latency}ms · Perfil: ${data.profile}`;
-
-    _testResults[profileId] = { ok: true, latency };
-    _testedCount = Object.keys(_testResults).length;
-    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
-
-    log('ok', `[${profileId}] ✅ OK em ${latency}ms — agente: ${agentId}`);
-    toast('ok', `${profileId} respondeu em ${latency}ms!`);
-
-    // Remove test agent after 3s to not pollute the island
-    setTimeout(async () => {
-      try {
-        await fetch(`${API}/agent/${agentId}`, {
-          method: 'DELETE',
-          headers: { 'X-Admin-Token': ADMIN_TOKEN }
-        });
-        log('info', `[${profileId}] Agente de teste ${agentId} removido.`);
-      } catch {}
-    }, 3000);
-
   } catch(e) {
-    const latency = Date.now() - t0;
-    card.className = 'test-card error';
-    status.className = 'test-status err';
-    status.textContent = `❌ Erro: ${e.message}`;
-    resp.textContent = e.message;
-    resp.style.display = 'block';
-    meta.textContent = `Falhou em ${latency}ms`;
-
-    _testResults[profileId] = { ok: false, latency, error: e.message };
-    _testedCount = Object.keys(_testResults).length;
-    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
-
-    log('err', `[${profileId}] ❌ ERRO: ${e.message}`);
-    toast('err', `${profileId} falhou: ${e.message}`);
+    if (status) {
+      const isTimeout = e.name === 'AbortError';
+      status.textContent = isTimeout ? '❌ Timeout' : '❌ Erro';
+      status.className = 'test-status err';
+      resp.textContent = isTimeout ? 'A requisição demorou demais.' : e.message;
+    }
+    log('err', `Teste [${profileId}]: ${e.message}`);
   }
 }
 
@@ -749,18 +878,17 @@ function clearResults() {
 // ── Agents ────────────────────────────────────────────────────────────────────
 async function loadAgents() {
   try {
-    const data = await fj('/');
     const worldData = await fj('/world/scoreboard').catch(() => ({ scoreboard: [] }));
-    const status = await fj('/').catch(() => ({}));
+    
+    // Use the new REST endpoint instead of the WS hack
+    const wsState = await fj('/world/state').catch(() => null);
+    if (!wsState) return;
 
-    // Use websocket state for live agent data via REST
-    // We'll get agent list from the root state broadcast
-    const wsState = await fetchWorldState();
-    renderAgents(wsState?.agents || []);
+    renderAgents(wsState.agents || []);
 
     // Sidebar summary
     const sb = document.getElementById('sidebar-agents');
-    const agents = wsState?.agents || [];
+    const agents = wsState.agents || [];
     sb.innerHTML = agents.map(a => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
         <span style="font-weight:600">${a.name}</span>
@@ -806,7 +934,7 @@ function renderAgents(agents) {
     const hpClass = hp > 60 ? '' : hp > 30 ? 'mid' : 'low';
     const dotClass = !a.is_alive ? 'off' : a.is_zombie ? 'zombie' : 'on';
     const tokPct = a.token_budget > 0 ? Math.round(a.tokens_used / a.token_budget * 100) : 0;
-    return `<tr>
+    return `<tr data-id="${a.id}">
       <td><span class="alive-dot ${dotClass}"></span></td>
       <td><strong>${a.name}</strong>${a.owner_id ? `<div style="font-size:.68rem;color:var(--muted)">${a.owner_id}</div>` : ''}</td>
       <td><span class="badge badge-purple">${a.profile_id || '—'}</span></td>
@@ -832,23 +960,171 @@ function getModelForProfile(profileId) {
   return p ? p.model.split('/').pop() : '?';
 }
 
-async function removeAgent(agentId, name) {
-  if (!confirm(`Remover ${name} da ilha?`)) return;
+function removeAgent(agentId, name) {
+  showConfirmModal('⚠️ REMOVER AGENTE', `Deseja realmente remover ${name} da ilha?`, () => doRemoveAgent(agentId, name));
+}
+
+async function doRemoveAgent(agentId, name) {
+  // Optimistic UI: Shade the correct row using data-id
+  const row = document.querySelector(`#agents-tbody tr[data-id="${agentId}"]`);
+  if (row) {
+    row.style.opacity = '0.3';
+    row.style.pointerEvents = 'none';
+  }
+
   try {
+    const token = currentAdminToken;
     const r = await fetch(`${API}/agent/${agentId}`, {
       method: 'DELETE',
-      headers: { 'X-Admin-Token': ADMIN_TOKEN }
+      headers: { 'X-Admin-Token': token }
     });
+    
     if (r.ok) {
       toast('ok', `${name} removido!`);
       log('ok', `Agente ${name} removido.`);
-      setTimeout(loadAgents, 1000);
+      
+      // Remove the exact row from DOM
+      const target = document.querySelector(`#agents-tbody tr[data-id="${agentId}"]`);
+      if (target) target.remove();
+
+      // Update KPIs
+      const kpi = document.getElementById('kpi-active-agents');
+      if (kpi) kpi.textContent = Math.max(0, parseInt(kpi.textContent || '0') - 1);
+
+      // Refresh data after a small delay to ensure all views are in sync
+      setTimeout(loadAgents, 1500);
+    } else if (r.status === 401) {
+      // Revert if unauthorized
+      loadAgents(); 
+      openAdminPrompt(() => doRemoveAgent(agentId, name));
     } else {
-      const e = await r.json();
+      const e = await r.json().catch(() => ({detail: 'Erro desconhecido'}));
       toast('err', e.detail || 'Erro ao remover');
+      loadAgents();
     }
   } catch(e) {
     toast('err', e.message);
+    loadAgents();
+  }
+}
+
+// ── Add New Profile Logic ───────────────────────────────────────────────────
+function applyProviderPreset(val) {
+  const urlInp = document.getElementById('new-base-url');
+  const keyInp = document.getElementById('new-api-key');
+  
+  const presets = {
+    'omnirouter': { url: 'http://localhost:20128/v1', key: '' },
+    'openai': { url: 'https://api.openai.com/v1', key: '' },
+    'groq': { url: 'https://api.groq.com/openai/v1', key: '' },
+    'openrouter': { url: 'https://openrouter.ai/api/v1', key: '' },
+    'custom': { url: '', key: '' }
+  };
+  
+  if (presets[val]) {
+    urlInp.value = presets[val].url;
+    // Don't overwrite key if already typed unless it's a specific preset
+  }
+  fetchModelsForRegistration();
+}
+
+async function fetchModelsForRegistration() {
+  const url = document.getElementById('new-base-url').value;
+  const key = document.getElementById('new-api-key').value;
+  const select = document.getElementById('new-model-select');
+  if (!select) return;
+
+  if (!url) {
+    select.innerHTML = '<option value="">Digite a URL...</option>';
+    return;
+  }
+
+  select.innerHTML = '<option>🔍 Carregando modelos...</option>';
+  try {
+    // Passamos is_registration=true e a api_key atual para o backend
+    const res = await fetch(`${API}/models?is_registration=true&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(key)}`);
+    const data = await res.json();
+    
+    if (data.models && data.models.length > 0) {
+      select.innerHTML = data.models.map(m => `<option value="${m.id}">${m.name} [${m.source}]</option>`).join('');
+    } else {
+      select.innerHTML = '<option value="">Nenhum modelo detectado</option>';
+    }
+  } catch(e) {
+    select.innerHTML = '<option value="">Erro ao conectar</option>';
+  }
+}
+
+async function testNewConfig() {
+  const pid = document.getElementById('new-profile-id').value;
+  const model = document.getElementById('new-model-select').value;
+  const url = document.getElementById('new-base-url').value;
+  const key = document.getElementById('new-api-key').value;
+  const btn = document.getElementById('btn-test-new');
+  const saveBtn = document.getElementById('btn-save-new');
+  const resultDiv = document.getElementById('new-test-result');
+
+  if (!pid || !model) {
+    toast('err', 'ID e Modelo são obrigatórios!');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Testando...';
+  resultDiv.style.display = 'none';
+
+  try {
+    const r = await fetch(`${API}/debug/test_model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        manual_config: { model, base_url: url, api_key: key }
+      })
+    });
+    const data = await r.json();
+
+    if (data.ok) {
+      resultDiv.innerHTML = `<div class="log-line log-ok">✅ Conectado! Resposta: "${data.response}"</div>
+                             <div class="log-line log-info">Latência: ${Math.round(data.latency_ms)}ms</div>`;
+      saveBtn.style.display = 'inline-block';
+      toast('ok', 'Configuração validada com sucesso!');
+    } else {
+      resultDiv.innerHTML = `<div class="log-line log-err">❌ Falha: ${data.error}</div>`;
+      saveBtn.style.display = 'none';
+    }
+    resultDiv.style.display = 'block';
+  } catch(e) {
+    toast('err', 'Erro na conexão de teste');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🧪 Testar Configuração';
+  }
+}
+
+async function saveNewProfile() {
+  const pid = document.getElementById('new-profile-id').value;
+  const model = document.getElementById('new-model-select').value;
+  const url = document.getElementById('new-base-url').value;
+  const key = document.getElementById('new-api-key').value;
+
+  try {
+    const r = await fetch(`${API}/profiles/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_id: pid, model, base_url: url, api_key: key })
+    });
+    const data = await r.json();
+    if (r.ok) {
+      toast('ok', 'Perfil salvo! Reinicie o backend para aplicar.');
+      log('ok', `Perfil '${pid}' salvo no profiles.py`);
+      showConfirmModal('🚀 Perfil Salvo', 'O novo perfil foi adicionado ao arquivo profiles.py. Para que ele apareça na lista, você precisa reiniciar o servidor Python (backend).', () => {
+          location.reload();
+      });
+    } else {
+      toast('err', data.detail || 'Erro ao salvar');
+    }
+  } catch(e) {
+    toast('err', 'Erro de rede');
   }
 }
 
@@ -951,11 +1227,55 @@ function toast(type, msg) {
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 async function fj(path) {
-  const r = await fetch(API + path);
+  // Add cache buster to all GET requests to prevent stale UI
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `${API}${path}${sep}_=${Date.now()}`;
+  const r = await fetch(url);
   if (!r.ok) throw new Error(`${r.status} ${path}`);
   return r.json();
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+function showConfirmModal(title, message, onConfirm) {
+  const modal = document.getElementById('confirm-modal');
+  const titleEl = document.getElementById('confirm-modal-title');
+  const messageEl = document.getElementById('confirm-modal-message');
+  const btn = document.getElementById('confirm-modal-button');
+
+  if (modal && titleEl && messageEl && btn) {
+    titleEl.innerText = title;
+    messageEl.innerText = message;
+    btn.onclick = () => {
+      onConfirm();
+      closeConfirmModal();
+    };
+    modal.style.display = 'flex';
+  }
+}
+
+function closeConfirmModal() {
+  const modal = document.getElementById('confirm-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function goIsland() {
+  try {
+    const status = await fj('/');
+    if (status.started || status.ticks > 0) {
+      window.location.href = 'index.html?auto_enter=true';
+    } else {
+      showConfirmModal(
+        "🚀 COMEÇAR JOGO?", 
+        "A simulação ainda não começou. Deseja iniciar a partida agora?", 
+        async () => {
+          await fetch(`${API}/reset`, { method: 'POST' });
+          window.location.href = 'index.html?auto_enter=true';
+        }
+      );
+    }
+  } catch(e) {
+    window.location.href = 'index.html?auto_enter=true';
+  }
+}
 </script>
 </body>
 </html>

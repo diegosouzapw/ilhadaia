@@ -53,8 +53,15 @@ let chatHistory = JSON.parse(localStorage.getItem('bbb_chat_history') || '[]');
 let chatFilter = "all";
 let globalVolume = parseFloat(localStorage.getItem('bbb_volume') || '0.5');
 let currentDayCycle = 0; // 0-119, updated from server
-const raycaster = new THREE.Raycaster();
+let currentWorldTicks = 0;
+let currentSessionId = null;
+let acceptedSessionId = sessionStorage.getItem('bbb_accepted_session'); 
+// Default to false at startup to avoid flickering. 
+// We will only hide the opening screen once the WebSocket confirms the session is the same.
+let isIslandStarted = false; 
+let serverStarted = false; // T14: Real server state
 const pointer = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
 
 // Day/Night color targets
 const DAY_SKY = new THREE.Color(0x87CEEB);
@@ -92,10 +99,14 @@ function setAdminToken(token) {
 
 async function updateTickInterval(val) {
     try {
-        await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
+        const response = await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
             method: 'POST',
             headers: { 'X-Admin-Token': adminToken }
         });
+        if (response.status === 401) {
+            console.error("Unauthorized to update AI interval (but we removed this check?)");
+            return;
+        }
         console.log("AI Interval updated to:", val);
     } catch (e) {
         console.error("Failed to update AI interval", e);
@@ -228,41 +239,108 @@ if (settingsToggle) {
     settingsToggle.onclick = openSettings;
 }
 
+// --- Admin Prompt Logic ---
+let onAdminConfirm = null;
+const adminPromptModal = document.getElementById('admin-prompt-modal');
+const adminPromptInput = document.getElementById('admin-prompt-token');
+
+function openAdminPrompt(callback) {
+    onAdminConfirm = callback;
+    adminPromptModal.style.display = 'flex';
+    adminPromptInput.value = "";
+    adminPromptInput.focus();
+}
+
+function closeAdminPrompt() {
+    adminPromptModal.style.display = 'none';
+    onAdminConfirm = null;
+}
+
+function submitAdminPrompt() {
+    const token = adminPromptInput.value.trim();
+    if (token) {
+        setAdminToken(token);
+        if (onAdminConfirm) onAdminConfirm();
+        closeAdminPrompt();
+    }
+}
+
+// --- Confirm Modal Logic ---
+window.showConfirmModal = function(title, message, onConfirm) {
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const messageEl = document.getElementById('confirm-modal-message');
+    const btn = document.getElementById('confirm-modal-button');
+
+    if (modal && titleEl && messageEl && btn) {
+        titleEl.innerText = title;
+        messageEl.innerText = message;
+        btn.onclick = () => {
+            if (onConfirm) onConfirm();
+            window.closeConfirmModal();
+        };
+        modal.style.display = 'flex';
+    }
+};
+
+window.closeConfirmModal = function() {
+    const modal = document.getElementById('confirm-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+};
+
+async function resetGame(playerCount) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/reset?player_count=${playerCount}`, {
+            method: 'POST'
+        });
+        if (response.ok) {
+            console.log("Jogo resetado com sucesso.");
+            serverStarted = true;
+            checkOpeningScreenState();
+        }
+    } catch (e) {
+        console.error("Falha ao resetar jogo:", e);
+    }
+}
+
 async function saveSettings() {
     clearSettingsMessage();
-    const ai_provider = normalizeProvider(document.getElementById('ai-provider').value);
+    const ai_provider = document.getElementById('ai-provider').value;
     const ai_model = document.getElementById('ai-model').value;
     const omniroute_url = document.getElementById('omniroute-url').value;
-    const new_token = document.getElementById('admin-token').value.trim() || adminToken;
+    const new_token = document.getElementById('admin-token').value;
 
-    if (!new_token) {
+    if (!new_token && !adminToken) {
         showSettingsMessage("O TOKEN É OBRIGATÓRIO!", "error");
         return;
     }
 
+    const tokenToUse = new_token || adminToken;
+
     try {
         const response = await fetch(`${API_BASE_URL}/settings/ai`, {
             method: 'POST',
-            headers: {
+            headers: { 
                 'Content-Type': 'application/json',
-                'X-Admin-Token': new_token
+                'X-Admin-Token': tokenToUse 
             },
             body: JSON.stringify({ ai_provider, ai_model, omniroute_url })
         });
         if (response.ok) {
-            const data = await response.json();
             console.log("AI Settings saved successfully");
-            setAdminToken(new_token);
-            updateHeaderInfo(data.ai_provider, data.ai_model);
-            showSettingsMessage("PRESET SALVO!", "success");
+            setAdminToken(tokenToUse); // Update memory token for this session
+            updateHeaderInfo(ai_provider, ai_model); // Update header display
+            showSettingsMessage("CONFIGURAÇÃO SALVA!", "success");
             setTimeout(closeSettings, 1000);
         } else {
             console.error("Save failed:", response.status);
-            if (response.status === 401) {
-                showSettingsMessage("TOKEN INVÁLIDO!", "error");
-            } else {
-                showSettingsMessage("ERRO NO SERVIDOR!", "error");
-            }
+        if (response.status === 401) {
+            showSettingsMessage("TOKEN INVÁLIDO!", "error");
+        } else {
+            showSettingsMessage("ERRO NO SERVIDOR!", "error");
+        }
         }
     } catch (e) {
         console.error("Error saving AI settings", e);
@@ -276,18 +354,24 @@ async function toggleFastMode(isFast) {
         if (isFast) {
             // Parallel mode: interval = 0
             if (dropdown) dropdown.disabled = true;
-            await fetch(`${API_BASE_URL}/settings/ai_interval?interval=0`, { 
+            const res = await fetch(`${API_BASE_URL}/settings/ai_interval?interval=0`, { 
                 method: 'POST',
                 headers: { 'X-Admin-Token': adminToken }
             });
+            if (res.status === 401) {
+                return;
+            }
         } else {
             // Restore turn-based mode from dropdown value
             const val = dropdown ? dropdown.value : 5;
             if (dropdown) dropdown.disabled = false;
-            await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
+            const res = await fetch(`${API_BASE_URL}/settings/ai_interval?interval=${val}`, { 
                 method: 'POST',
                 headers: { 'X-Admin-Token': adminToken }
             });
+            if (res.status === 401) {
+                return;
+            }
         }
         console.log("Fast mode set to:", isFast);
     } catch (e) {
@@ -673,6 +757,27 @@ function connectWebSocket() {
             }
 
             if (message.type === "init") {
+                // Track session change
+                if (message.data.session_id) {
+                    const oldSid = currentSessionId;
+                    currentSessionId = message.data.session_id;
+                    
+                    // If we just accepted "any" session (acceptedSessionId was null/true)
+                    // or it matches exactly, and it's started, hide landing page
+                    if ((acceptedSessionId === true || acceptedSessionId === currentSessionId) && message.data.started) {
+                        isIslandStarted = true;
+                        acceptedSessionId = currentSessionId; // Lock it in
+                        checkOpeningScreenState();
+                    } else if (currentSessionId !== acceptedSessionId || !message.data.started) {
+                        // Different session or not started: ensure we reset state to show landing page
+                        isIslandStarted = false;
+                        acceptedSessionId = null;
+                        sessionStorage.removeItem('bbb_island_started');
+                        sessionStorage.removeItem('bbb_accepted_session');
+                        checkOpeningScreenState();
+                    }
+                }
+
                 // Restore settings from backend on first load if available
                 if (message.data.ai_interval !== undefined) {
                     const selector = document.getElementById("tick-interval-selector");
@@ -685,6 +790,13 @@ function connectWebSocket() {
                     const selector = document.getElementById("player-count-selector");
                     if (selector) selector.value = message.data.player_count;
                 }
+                serverStarted = message.data.started || false;
+                checkOpeningScreenState();
+            }
+            
+            if (message.data.started !== undefined) {
+                serverStarted = message.data.started;
+                checkOpeningScreenState();
             }
             
             updateWorld(message.data);
@@ -711,6 +823,11 @@ renderChat();
 
 // --- World Sync Logic ---
 function updateWorld(data) {
+    currentWorldTicks = data.ticks || 0;
+    
+    // Auto-hide removed to prevent flickering. 
+    // The opening screen visibility is now strictly controlled by session state and user interaction.
+
     if (!data.game_over) {
         document.getElementById("tick-counter").textContent = data.ticks;
     }
@@ -1158,7 +1275,7 @@ async function resetGame(count) {
             renderChat();
             // The server will broadcast the reset
         } else if (response.status === 401) {
-            alert("Não autorizado. Verifique seu Admin Token no console (setAdminToken('seu_token')).");
+            console.error("Reset failed: Unauthorized");
         }
     } catch (e) {
         console.error("Reset failed", e);
@@ -1333,9 +1450,80 @@ function setCameraFixed(val) {
     applyCameraMode();
 }
 
+
+
 window.toggleCameraMode = function() {
     // Disabled
 };
+
+// --- Opening Screen Logic ---
+window.addEventListener('DOMContentLoaded', () => {
+    const islandCard = document.querySelector('.opening-card');
+    if (islandCard) {
+        islandCard.addEventListener('click', (e) => {
+            enterIsland();
+        });
+    }
+});
+
+window.enterIsland = function() {
+    if (serverStarted) {
+        finalizeEntry();
+    } else {
+        window.showConfirmModal(
+            "🚀 COMEÇAR JOGO?", 
+            "A simulação ainda não começou. Deseja iniciar a partida agora?", 
+            () => {
+                const playerCount = document.getElementById('player-count-selector')?.value || 4;
+                resetGame(playerCount);
+                finalizeEntry();
+            }
+        );
+    }
+};
+
+
+
+function finalizeEntry() {
+    isIslandStarted = true;
+    acceptedSessionId = currentSessionId || true; // Use 'true' as placeholder if session not yet known
+    sessionStorage.setItem('bbb_island_started', 'true');
+    if (currentSessionId) {
+        sessionStorage.setItem('bbb_accepted_session', currentSessionId);
+    }
+    const os = document.getElementById('opening-screen');
+    if (os) os.classList.add('hidden');
+}
+
+function checkOpeningScreenState() {
+    const os = document.getElementById('opening-screen');
+    if (isIslandStarted) {
+        if (os) os.classList.add('hidden');
+    } else {
+        if (os) os.classList.remove('hidden');
+    }
+}
+
+// Initial session check
+checkOpeningScreenState();
+
+// Handle auto-entry from dashboard/models
+(function handleAutoEntry() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auto_enter') === 'true') {
+        // We might need to wait for serverStarted to be updated by the websocket
+        const checkStart = setInterval(() => {
+            if (serverStarted) {
+                finalizeEntry();
+                clearInterval(checkStart);
+                // Remove param from URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }, 100);
+        // Timeout after 3 seconds if server never says started
+        setTimeout(() => clearInterval(checkStart), 3000);
+    }
+})();
 
 animate();
 renderer.domElement.addEventListener('click', handleWorldClick);

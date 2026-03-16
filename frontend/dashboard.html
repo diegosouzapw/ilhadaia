@@ -7,6 +7,7 @@
   <meta name="description" content="Dashboard analítico do BBBia: histórico de sessões, comparação de modelos IA e análise de performance."/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -153,6 +154,8 @@
       content: ''; flex: 1; height: 1px; background: var(--border);
     }
 
+
+
     /* ── Responsive ── */
     @media(max-width: 900px) {
       .grid-2, .grid-3 { grid-template-columns: 1fr; }
@@ -161,6 +164,18 @@
   </style>
 </head>
 <body>
+  
+  <!-- Confirmation Modal -->
+  <div id="confirm-modal" class="hidden-modal" style="display: none;">
+    <div class="modal-content">
+      <h3 id="confirm-modal-title">⚠️ Confirmar</h3>
+      <p id="confirm-modal-message" style="font-size: 13px; margin: 15px 0; line-height: 1.5; color: #ccc;"></p>
+      <div class="modal-footer">
+        <button onclick="closeConfirmModal()">Cancelar</button>
+        <button class="primary-btn" id="confirm-modal-button" style="padding: 8px 16px; border-radius: 6px; cursor: pointer; border: none; background: #ffeb3b; color: black; font-weight: bold;">Confirmar</button>
+      </div>
+    </div>
+  </div>
 
 <header>
   <div>
@@ -169,7 +184,7 @@
   </div>
   <div class="header-actions">
     <nav style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:5px 10px;backdrop-filter:blur(6px)">
-      <a href="index.html"     style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
+      <a href="javascript:void(0)" onclick="goIsland()" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
       <a href="dashboard.html" style="text-decoration:none;color:#ffd740;font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;background:rgba(255,215,64,.12)">📊 Dashboard</a>
       <a href="models.html"    style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🤖 Modelos</a>
     </nav>
@@ -178,6 +193,8 @@
 </header>
 
 <div class="container">
+
+
 
   <!-- KPIs -->
   <div class="kpi-grid" id="kpi-grid">
@@ -468,6 +485,48 @@ function setText(id, val) { const el = document.getElementById(id); if (el) el.t
 function fmtDate(ts) {
   if (!ts) return '—';
   return new Date(ts * 1000).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' });
+}
+function showConfirmModal(title, message, onConfirm) {
+  const modal = document.getElementById('confirm-modal');
+  const titleEl = document.getElementById('confirm-modal-title');
+  const messageEl = document.getElementById('confirm-modal-message');
+  const btn = document.getElementById('confirm-modal-button');
+
+  if (modal && titleEl && messageEl && btn) {
+    titleEl.innerText = title;
+    messageEl.innerText = message;
+    btn.onclick = () => {
+      onConfirm();
+      closeConfirmModal();
+    };
+    modal.style.display = 'flex';
+  }
+}
+
+function closeConfirmModal() {
+  const modal = document.getElementById('confirm-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function goIsland() {
+  try {
+    const status = await fj('/');
+    // Check for both 'started' and ticks > 0 (as fallback)
+    if (status.started || status.ticks > 0) {
+      window.location.href = 'index.html?auto_enter=true';
+    } else {
+      showConfirmModal(
+        "🚀 COMEÇAR JOGO?", 
+        "A simulação ainda não começou. Deseja iniciar a partida agora?", 
+        async () => {
+          await fetch(`${API}/reset`, { method: 'POST' });
+          window.location.href = 'index.html?auto_enter=true';
+        }
+      );
+    }
+  } catch(e) {
+    window.location.href = 'index.html?auto_enter=true';
+  }
 }
 </script>
 </body>

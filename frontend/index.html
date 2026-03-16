@@ -246,7 +246,7 @@
             <div id="omni-fields" style="display: none;">
                 <div class="settings-group">
                     <label for="omniroute-url">Base URL do endpoint:</label>
-                    <input type="text" id="omniroute-url" placeholder="http://192.168.0.15:20128/v1">
+                    <input type="text" id="omniroute-url" placeholder="http://localhost:20128/v1">
                 </div>
             </div>
             <div id="settings-message"></div>
@@ -259,6 +259,61 @@
 
     <!-- Scripts de extensão para benchmark e replay -->
     <script src="benchmark.js"></script>
+    <div id="admin-prompt-modal" class="hidden-modal">
+        <div class="modal-content">
+            <h3>🔑 Admin Token</h3>
+            <p style="font-size: 11px; color: #aaa; margin-bottom: 15px;">Esta ação requer autorização.</p>
+            <div class="settings-group">
+                <input type="password" id="admin-prompt-token" placeholder="Token do Admin" onkeyup="if(event.key === 'Enter') submitAdminPrompt()">
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeAdminPrompt()">Cancelar</button>
+                <button class="primary-btn" onclick="submitAdminPrompt()">Enviar</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="confirm-modal" class="hidden-modal">
+        <div class="modal-content">
+            <h3 id="confirm-modal-title">⚠️ Confirmar</h3>
+            <p id="confirm-modal-message" style="font-size: 13px; margin: 15px 0;"></p>
+            <div class="modal-footer">
+                <button onclick="closeConfirmModal()">Cancelar</button>
+                <button class="primary-btn" id="confirm-modal-button">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Opening Screen ═══ -->
+    <div id="opening-screen" class="">
+        <div class="opening-content">
+            <h1 class="opening-title">BBBia</h1>
+            <p class="opening-subtitle">A Ilha da Inteligência Artificial</p>
+            
+            <div class="opening-grid">
+                <div class="opening-card">
+                    <div class="card-icon">🌴</div>
+                    <h3>Ilha ao Vivo</h3>
+                    <p>Entre na ilha e acompanhe a simulação em tempo real.</p>
+                </div>
+                <a class="opening-card" href="dashboard.html">
+                    <div class="card-icon">📊</div>
+                    <h3>Dashboard</h3>
+                    <p>Analise métricas, comportamento e histórico dos agentes.</p>
+                </a>
+                <a class="opening-card" href="models.html">
+                    <div class="card-icon">🤖</div>
+                    <h3>Modelos</h3>
+                    <p>Configure perfis de IA e registre novos agentes.</p>
+                </a>
+            </div>
+            
+            <div class="opening-footer">
+                ET Labs & Inteligência Mil Grau © 2026
+            </div>
+        </div>
+    </div>
+
     <script src="main.js"></script>
 </body>
 </html>

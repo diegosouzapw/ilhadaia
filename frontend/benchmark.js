@@ -34,7 +34,7 @@ const BENCHMARK_API_BASE_URL = getApiBaseUrl();
  */
 function updateBenchmarkHUD(agents, sessionId) {
     const tbody = document.getElementById('benchmark-body');
-    if (!tbody || !agents || agents.length === 0) return;
+    if (!tbody || !agents) return;
 
     // Atualizar session ID
     const sidEl = document.getElementById('session-id-display');
