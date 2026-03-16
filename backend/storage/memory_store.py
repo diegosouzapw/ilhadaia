@@ -16,6 +16,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_memories (
     owner_id      TEXT NOT NULL,
     agent_name    TEXT NOT NULL,
+    profile_id    TEXT NOT NULL DEFAULT 'unknown',
     memory_json   TEXT NOT NULL,
     updated_at    REAL NOT NULL,
     PRIMARY KEY (owner_id, agent_name)
@@ -32,6 +33,12 @@ class MemoryStore:
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
+        # Migração: Garantir que profile_id existe se a tabela for antiga
+        try:
+            self.conn.execute("ALTER TABLE agent_memories ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'unknown'")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass # Coluna já existe
         self.conn.commit()
 
     def save(self, agent) -> None:
@@ -53,9 +60,9 @@ class MemoryStore:
 
         self.conn.execute(
             """INSERT OR REPLACE INTO agent_memories
-               (owner_id, agent_name, memory_json, updated_at)
-               VALUES (?, ?, ?, ?)""",
-            (owner_id, agent.name, json.dumps(memory_dict), time.time()),
+               (owner_id, agent_name, profile_id, memory_json, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (owner_id, agent.name, getattr(agent, "profile_id", "unknown"), json.dumps(memory_dict), time.time()),
         )
         self.conn.commit()
         logger.debug(f"Saved memory for {agent.name} (owner={owner_id})")
@@ -133,9 +140,9 @@ class MemoryStore:
     def list_agents_with_memory(self) -> list[dict]:
         """Lista todos os agentes que possuem memória salva."""
         rows = self.conn.execute(
-            "SELECT owner_id, agent_name, updated_at FROM agent_memories ORDER BY updated_at DESC"
+            "SELECT owner_id, agent_name, profile_id, updated_at FROM agent_memories ORDER BY updated_at DESC"
         ).fetchall()
-        return [{"owner_id": r[0], "agent_name": r[1], "updated_at": r[2]} for r in rows]
+        return [{"owner_id": r[0], "agent_name": r[1], "profile_id": r[2], "updated_at": r[3]} for r in rows]
 
     def delete(self, owner_id: str, agent_name: str) -> bool:
         """Remove a memória de um agente específico."""

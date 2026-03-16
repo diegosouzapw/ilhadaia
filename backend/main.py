@@ -603,7 +603,7 @@ async def debug_test_model(req: dict):
             "error": str(e)
         }
 
-@app.post("/profiles/add")
+@app.post("/profiles/add", dependencies=[Depends(verify_admin_token)])
 async def add_profile(req: dict):
     """Adiciona um novo perfil ao arquivo profiles.py permanentemente."""
     pid = req.get("profile_id")
@@ -677,7 +677,7 @@ async def add_profile(req: dict):
 
 # ── Agent Registration (T14) ──────────────────────────────────────────────────
 
-@app.post("/agents/register")
+@app.post("/agents/register", dependencies=[Depends(verify_admin_token)])
 @_rate_limit("10/minute")
 async def register_agent(request: Request, reg: AgentRegistration):
     """Owner registra um agente customizado na ilha."""
@@ -704,6 +704,7 @@ async def register_agent(request: Request, reg: AgentRegistration):
     new_agent.cooldown_ticks = profile.cooldown_ticks
 
     memory_store.load(new_agent)
+    memory_store.save(new_agent) # Garantir que o perfil e nome sejam lembrados imediatamente
     world.add_agent(new_agent)
     logger.info(f"🤖 Registered agent: {reg.agent_name} [{reg.profile_id}] by {reg.owner_id}")
     asyncio.create_task(webhook_manager.fire_event("agent_registered", {
@@ -726,6 +727,60 @@ async def register_agent(request: Request, reg: AgentRegistration):
         "model": profile.model,
         "token_budget": profile.token_budget,
     }
+
+@app.get("/agents/all")
+async def get_all_agents():
+    """
+    Retorna a lista completa de agentes:
+    1. Agentes ativos no mundo (vivos ou zumbis).
+    2. Agentes históricos salvos no memory_store (inativos).
+    """
+    active_agents = []
+    seen_keys = set()
+    
+    # 1. Agentes Ativos
+    for a in world.agents:
+        active_agents.append({
+            "id": a.id,
+            "name": a.name,
+            "owner_id": getattr(a, "owner_id", ""),
+            "profile_id": getattr(a, "profile_id", ""),
+            "hp": a.hp,
+            "is_alive": a.is_alive,
+            "is_zombie": getattr(a, "is_zombie", False),
+            "tokens_used": getattr(a, "tokens_used", 0),
+            "token_budget": getattr(a, "token_budget", 10000),
+            "benchmark": getattr(a, "benchmark", {}),
+            "status": "active" if a.is_alive else "dead"
+        })
+        # Chave para de-duplicação: (owner_id, name)
+        seen_keys.add((getattr(a, "owner_id", ""), a.name))
+
+    # 2. Agentes Inativos (da memória)
+    all_registered = memory_store.list_agents_with_memory()
+    for reg in all_registered:
+        key = (reg["owner_id"], reg["agent_name"])
+        if key not in seen_keys:
+            # Tentar carregar o perfil para ter o modelo correto
+            # Nota: Agentes históricos não tem um ID de instância ativo, usamos um placeholder
+            active_agents.append({
+                "id": f"historic_{reg['owner_id']}||{reg['agent_name']}",
+                "name": reg["agent_name"],
+                "owner_id": reg["owner_id"],
+                "profile_id": reg.get("profile_id", "unknown"),
+                "hp": 0,
+                "is_alive": False,
+                "is_zombie": False,
+                "tokens_used": 0,
+                "token_budget": 0,
+                "benchmark": {},
+                "status": "inactive",
+                "last_seen": reg["updated_at"]
+            })
+            seen_keys.add(key)
+            
+    return {"agents": active_agents}
+
 
 @app.get("/agents/{agent_id}/state")
 async def get_agent_state(agent_id: str):
@@ -864,7 +919,21 @@ async def agent_action(agent_id: str, req: ActionRequest):
 
 @app.delete("/agent/{agent_id}", dependencies=[Depends(verify_admin_token)])
 async def delete_agent(agent_id: str):
-    """Remove um agente da ilha. Requer X-Admin-Token."""
+    """Remove um agente da ilha (se ativo) ou da memória persistente (se histórico)."""
+    # Caso 1: Agente Histórico (prefixo 'historic_owner_name')
+    if agent_id.startswith("historic_"):
+        # historic_owner||name
+        core = agent_id.replace("historic_", "", 1)
+        if "||" in core:
+            parts = core.split("||", 1)
+            owner_id = parts[0]
+            agent_name = parts[1]
+            deleted = memory_store.delete(owner_id, agent_name)
+            if deleted:
+                return {"status": "Memory deleted", "agent_id": agent_id, "owner_id": owner_id, "name": agent_name}
+        raise HTTPException(status_code=404, detail=f"Memória persistente não encontrada para {agent_id}")
+
+    # Caso 2: Agente Ativo na Ilha
     success = world.remove_agent(agent_id)
     if success:
         state = world.get_state()
@@ -873,7 +942,52 @@ async def delete_agent(agent_id: str):
             "events": [{"action": "busy", "event_msg": "UM AGENTE FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
         })
         return {"status": "Agent removed", "agent_id": agent_id, "state": state}
-    raise HTTPException(status_code=404, detail="Agent not found")
+    
+    raise HTTPException(status_code=404, detail="Agente ativo não encontrado")
+
+class AgentProfileUpdate(BaseModel):
+    profile_id: str
+
+@app.patch("/agent/{agent_id}/profile", dependencies=[Depends(verify_admin_token)])
+async def update_agent_profile(agent_id: str, up: AgentProfileUpdate):
+    """Atualiza o perfil de IA de um agente (ativo ou histórico)."""
+    if up.profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil '{up.profile_id}' não existe.")
+
+    # Caso 1: Agente Ativo
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if agent:
+        agent.profile_id = up.profile_id
+        # Se for um agente do sistema, salvar o override de forma permanente
+        if agent_id.startswith("sys_"):
+            world.system_agent_overrides[agent_id] = up.profile_id
+            world._save_history()
+        
+        # Sincronizar com a memória persistente também, se o agente tiver dono
+        if getattr(agent, "owner_id", ""):
+            memory_store.save(agent)
+            
+        return {"status": "Agent profile updated", "agent_id": agent_id, "profile_id": up.profile_id}
+
+    # Caso 2: Agente Histórico
+    if agent_id.startswith("historic_"):
+        core = agent_id.replace("historic_", "", 1)
+        if "||" in core:
+            parts = core.split("||", 1)
+            owner_id = parts[0]
+            agent_name = parts[1]
+            
+            try:
+                memory_store.conn.execute(
+                    "UPDATE agent_memories SET profile_id=? WHERE owner_id=? AND agent_name=?",
+                    (up.profile_id, owner_id, agent_name)
+                )
+                memory_store.conn.commit()
+                return {"status": "Historical agent profile updated", "agent_id": agent_id, "profile_id": up.profile_id}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Erro ao atualizar memória: {e}")
+
+    raise HTTPException(status_code=404, detail="Agente não encontrado")
 
 # ═══════════════════════════════════════════════════════════════════════
 # T18 — Rate Limiting (slowapi)

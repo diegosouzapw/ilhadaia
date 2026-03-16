@@ -17,6 +17,7 @@ class World:
         self.game_over = False
         self.winner = None
         self.entities: Dict[str, Any] = {} # Map of id -> entity (agents, items)
+        self.system_agent_overrides: Dict[str, str] = {} # sys_id -> profile_id
         
         # Initialize map with basic resources (wood, stone)
         self._init_map()
@@ -85,6 +86,7 @@ class World:
                     self.ai_provider = "omnirouter"
                     self.ai_model = settings.get("ai_model", "kr/claude-sonnet-4.5")
                     self.omniroute_url = settings.get("omniroute_url", "http://localhost:20128/v1")
+                    self.system_agent_overrides = settings.get("system_agent_overrides", {})
         except Exception as e:
             logger.error(f"Error loading history/settings: {e}")
             self.scores = {}
@@ -104,7 +106,8 @@ class World:
                     "player_count": self.player_count,
                     "ai_provider": self.ai_provider,
                     "ai_model": self.ai_model,
-                    "omniroute_url": self.omniroute_url
+                    "omniroute_url": self.omniroute_url,
+                    "system_agent_overrides": self.system_agent_overrides
                 }, f, ensure_ascii=False, indent=4)
         except Exception as e:
             logger.error(f"Error saving history/settings: {e}")
@@ -1041,18 +1044,24 @@ class World:
         self.spawn_index = 0
         
         # Possible Initial Squad
+        # Possible Initial Squad with fixed IDs
         squad = [
-            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", 2, 2),
-            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", 17, 17),
-            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", 17, 2),
-            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", 2, 17)
+            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", 2, 2, agent_id="sys_joao"),
+            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", 17, 17, agent_id="sys_maria"),
+            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", 17, 2, agent_id="sys_zeca"),
+            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", 2, 17, agent_id="sys_elly")
         ]
 
         # Atribui um perfil de IA diferente para cada personagem default
         # Todos usam o mesmo endpoint OmniRoute — só o modelo muda.
         _default_profiles = ["claude-kiro", "kimi-thinking", "kimi-groq", "claude-haiku"]
         for i, agent in enumerate(squad):
-            agent.profile_id = _default_profiles[i % len(_default_profiles)]
+            # Prioridade para o override persistente
+            saved_profile = self.system_agent_overrides.get(agent.id)
+            if saved_profile:
+                agent.profile_id = saved_profile
+            else:
+                agent.profile_id = _default_profiles[i % len(_default_profiles)]
 
         # Add only the first N players selected
         for i in range(min(player_count, len(squad))):

@@ -261,18 +261,22 @@
 
     /* ── Separator ── */
     .sep { height: 1px; background: var(--border); margin: 20px 0; }
-
-
-
-
-
-    @media(max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
-      .test-grid { grid-template-columns: 1fr; }
-      .form-grid { grid-template-columns: 1fr; }
-      .form-group.full { grid-column: 1; }
+    /* ── Modals ── */
+    .hidden-modal {
+      display: none; position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,.85); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center; padding: 20px;
     }
+    .modal-content {
+      background: var(--bg2); border: 1px solid var(--border);
+      width: 100%; max-width: 400px; border-radius: 16px; padding: 28px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.6), 0 0 40px rgba(124,111,255,.15);
+      animation: modalSlide .3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    }
+    @keyframes modalSlide { from{transform:translateY(30px);opacity:0} to{transform:translateY(0);opacity:1} }
+    .modal-content h3 { font-size: 1.15rem; font-weight: 900; margin-bottom: 6px; color: var(--accent2); display: flex; align-items: center; gap: 10px; }
+    .modal-content p { font-size: .82rem; color: var(--muted); line-height: 1.5; margin-bottom: 20px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
   </style>
 </head>
 <body>
@@ -358,7 +362,7 @@
     <div class="tabs">
       <button class="tab active" id="tab-test"    onclick="switchTab('test')">🧪 Testar Modelos</button>
       <button class="tab"        id="tab-new-profile" onclick="switchTab('new-profile')">✨ Novo Perfil</button>
-      <button class="tab"        id="tab-agents"  onclick="switchTab('agents')">🤖 Agentes Ativos</button>
+      <button class="tab"        id="tab-agents"  onclick="switchTab('agents')">👥 Lista de Agentes</button>
       <button class="tab"        id="tab-register" onclick="switchTab('register')">➕ Adicionar Agente</button>
       <button class="tab"        id="tab-profiles" onclick="switchTab('profiles')">⚙️ Ver Perfis</button>
     </div>
@@ -533,17 +537,19 @@
   </main>
 </div>
 
-<!-- Custom Modals -->
+<!-- Admin Token Modal -->
 <div id="admin-prompt-modal" class="hidden-modal">
   <div class="modal-content">
-      <h3>🔑 Admin Token</h3>
-      <p>Esta ação requer autorização.</p>
-      <div class="form-group" style="margin: 15px 0;">
-          <input type="password" id="admin-prompt-token" placeholder="Token do Admin" onkeyup="if(event.key === 'Enter') submitAdminPrompt()">
+      <h3><span style="color:var(--yellow)">🔑</span> Acesso Restrito</h3>
+      <p>Esta operação requer privilégios de administrador. Insira o token para prosseguir.</p>
+      <div class="form-group" style="margin: 20px 0;">
+          <input type="password" id="admin-prompt-token" placeholder="Token do Admin" 
+                 style="text-align:center; letter-spacing: 4px; font-weight: bold; border-color: var(--accent);"
+                 onkeyup="if(event.key === 'Enter') submitAdminPrompt()">
       </div>
-      <div class="modal-footer" style="display:flex; justify-content:center; gap:10px;">
-          <button class="btn btn-outline" onclick="closeAdminPrompt()">Cancelar</button>
-          <button class="btn btn-primary" onclick="submitAdminPrompt()">Enviar</button>
+      <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeAdminPrompt()">Voltar</button>
+          <button class="btn btn-primary" onclick="submitAdminPrompt()">Desbloquear</button>
       </div>
   </div>
 </div>
@@ -586,6 +592,7 @@ function submitAdminPrompt() {
     const token = adminPromptInput.value.trim();
     if (token) {
         currentAdminToken = token;
+        localStorage.setItem('bbb_admin_token', token);
         if (onAdminConfirm) onAdminConfirm();
         closeAdminPrompt();
     }
@@ -619,7 +626,7 @@ const API = (() => {
   return `http://${host}:${port}`;
 })();
 
-let currentAdminToken = 'dev_token_123';
+let currentAdminToken = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
 
 let _profiles = [];
 let _testResults = {};
@@ -878,13 +885,12 @@ function clearResults() {
 // ── Agents ────────────────────────────────────────────────────────────────────
 async function loadAgents() {
   try {
-    const worldData = await fj('/world/scoreboard').catch(() => ({ scoreboard: [] }));
-    
-    // Use the new REST endpoint instead of the WS hack
-    const wsState = await fj('/world/state').catch(() => null);
-    if (!wsState) return;
+    // Carrega a lista completa (ativos + históricos)
+    const res = await fetch(`${API}/agents/all`).catch(() => null);
+    if (!res) return;
+    const data = await res.json();
 
-    renderAgents(wsState.agents || []);
+    renderAgents(data.agents || []);
 
     // Sidebar summary
     const sb = document.getElementById('sidebar-agents');
@@ -930,15 +936,37 @@ function renderAgents(agents) {
   document.getElementById('kpi-active-agents').textContent = agents.filter(a => a.is_alive).length;
 
   tb.innerHTML = agents.map(a => {
-    const hp = a.hp ?? 100;
+    const isInactive = a.status === 'inactive';
+    const hp = a.hp ?? 0;
     const hpClass = hp > 60 ? '' : hp > 30 ? 'mid' : 'low';
-    const dotClass = !a.is_alive ? 'off' : a.is_zombie ? 'zombie' : 'on';
+    
+    let dotClass = 'off';
+    if (a.is_alive) dotClass = a.is_zombie ? 'zombie' : 'on';
+    if (isInactive) dotClass = 'off'; // Ou criar uma classe 'inactive' se preferir
+
     const tokPct = a.token_budget > 0 ? Math.round(a.tokens_used / a.token_budget * 100) : 0;
-    return `<tr data-id="${a.id}">
+    
+    // Estilo para linha inativa
+    const rowStyle = isInactive ? 'opacity: 0.6; filter: grayscale(0.5);' : '';
+    const statusText = isInactive ? '<span style="font-size:0.7rem;color:var(--muted)">[Inativo]</span>' : '';
+
+    return `<tr data-id="${a.id}" style="${rowStyle}">
       <td><span class="alive-dot ${dotClass}"></span></td>
-      <td><strong>${a.name}</strong>${a.owner_id ? `<div style="font-size:.68rem;color:var(--muted)">${a.owner_id}</div>` : ''}</td>
-      <td><span class="badge badge-purple">${a.profile_id || '—'}</span></td>
-      <td style="font-family:monospace;font-size:.72rem;color:var(--accent2)">${getModelForProfile(a.profile_id)}</td>
+      <td>
+        <strong>${a.name}</strong> ${statusText}
+        ${a.owner_id ? `<div style="font-size:.68rem;color:var(--muted)">${a.owner_id}</div>` : ''}
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <select class="btn btn-bg btn-sm" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);padding:2px 5px;font-size:0.7rem;border-radius:4px;" 
+                  onclick="event.stopPropagation()" 
+                  onchange="changeAgentProfile('${a.id}', this.value)">
+            ${_profiles.map(p => `<option value="${p.profile_id}" ${p.profile_id === a.profile_id ? 'selected' : ''}>${p.profile_id}</option>`).join('')}
+          </select>
+          <button id="test-btn-${a.id}" class="btn btn-outline btn-sm" style="padding:2px 5px;font-size:0.7rem;" title="Teste Rápido" onclick="testAgentProfile('${a.id}', '${a.profile_id}')">⚡</button>
+        </div>
+      </td>
+      <td id="model-cell-${a.id}" style="font-family:monospace;font-size:.72rem;color:var(--accent2)">${getModelForProfile(a.profile_id)}</td>
       <td>
         <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hp}%"></div></div>
         <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${hp}/100</div>
@@ -955,9 +983,49 @@ function renderAgents(agents) {
   }).join('');
 }
 
+async function changeAgentProfile(aId, pId) {
+  try {
+    const r = await fetch(`${API}/agent/${aId}/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': currentAdminToken },
+      body: JSON.stringify({ profile_id: pId })
+    });
+    if (r.ok) {
+        toast('ok', 'Perfil atualizado!');
+        const cell = document.getElementById(`model-cell-${aId}`);
+        if (cell) cell.textContent = getModelForProfile(pId);
+        const btn = document.getElementById(`test-btn-${aId}`);
+        if (btn) {
+            btn.onclick = () => testAgentProfile(aId, pId);
+        }
+    } else if (r.status === 401) {
+        openAdminPrompt(() => changeAgentProfile(aId, pId));
+    } else {
+        const e = await r.json().catch(() => ({detail: 'Erro ao atualizar'}));
+        toast('err', e.detail || 'Erro ao atualizar');
+    }
+  } catch(e) { toast('err', e.message); }
+}
+
+async function testAgentProfile(aId, pId) {
+    const p = _profiles.find(x => x.profile_id === pId);
+    if (!p) return toast('err', 'Perfil não encontrado');
+    toast('info', `Testando ${pId}...`);
+    try {
+        const r = await fetch(`${API}/debug/test_model`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: pId, base_url: p.base_url, api_key: p.api_key, model: p.model })
+        });
+        const d = await r.json();
+        if (r.ok) toast('ok', `Teste OK: ${d.response.substring(0, 30)}...`);
+        else toast('err', `Erro: ${d.detail || 'Falha'}`);
+    } catch(e) { toast('err', e.message); }
+}
+
 function getModelForProfile(profileId) {
   const p = _profiles.find(x => x.profile_id === profileId);
-  return p ? p.model.split('/').pop() : '?';
+  return p ? p.model : '?';
 }
 
 function removeAgent(agentId, name) {
@@ -1110,17 +1178,20 @@ async function saveNewProfile() {
   try {
     const r = await fetch(`${API}/profiles/add`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': currentAdminToken },
       body: JSON.stringify({ profile_id: pid, model, base_url: url, api_key: key })
     });
-    const data = await r.json();
+    
     if (r.ok) {
       toast('ok', 'Perfil salvo! Reinicie o backend para aplicar.');
       log('ok', `Perfil '${pid}' salvo no profiles.py`);
       showConfirmModal('🚀 Perfil Salvo', 'O novo perfil foi adicionado ao arquivo profiles.py. Para que ele apareça na lista, você precisa reiniciar o servidor Python (backend).', () => {
           location.reload();
       });
+    } else if (r.status === 401) {
+      openAdminPrompt(() => saveNewProfile());
     } else {
+      const data = await r.json();
       toast('err', data.detail || 'Erro ao salvar');
     }
   } catch(e) {
@@ -1146,10 +1217,15 @@ async function registerAgent() {
   try {
     const r = await fetch(`${API}/agents/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': currentAdminToken },
       body: JSON.stringify({ owner_id: owner, owner_name: owner, agent_name: name, persona, profile_id: profile })
     });
     const data = await r.json();
+    if (r.status === 401) {
+       res.innerHTML = "";
+       openAdminPrompt(() => registerAgent());
+       return;
+    }
     if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
 
     res.innerHTML = `
