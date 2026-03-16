@@ -35,8 +35,9 @@ class Thinker:
             if profile.provider == "gemini":
                 self._adapters[key] = GeminiAdapter(model=profile.model)
             else:
+                # base_url vem do .env via OMNIROUTER_URL (definido em profiles.py)
                 self._adapters[key] = OpenAICompatibleAdapter(
-                    base_url=profile.base_url or "http://192.168.0.15:20128",
+                    base_url=profile.base_url,
                     model=profile.model,
                     api_key=profile.api_key,
                 )
@@ -77,7 +78,7 @@ class Thinker:
             return None
 
         # 2. Buscar perfil e adapter
-        profile = get_profile(getattr(agent, "profile_id", "gemini-native"))
+        profile = get_profile(getattr(agent, "profile_id", "claude-kiro"))
         adapter = self.get_adapter(profile)
 
         # 3. Montar prompts

@@ -1,181 +1,164 @@
-# 🏗️ Arquitetura — BBBia Versão Turbinada v0.5
+# Arquitetura Atual
 
-> Estado: **Produção** (março 2026) | Backend: FastAPI 0.115 | Python 3.12
+Estado documentado desta branch:
 
----
+- backend monolitico em `backend/main.py`
+- frontend estatico servido pelo proprio FastAPI em `/frontend/*`
+- runtime de IA centralizado em `runtime/thinker.py`
+- persistencia local em SQLite + NDJSON
+- operacao single-process / single-worker
 
-## Visão Geral
+## Visao geral
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        FRONTEND (Browser)                           │
-│   index.html           dashboard.html                               │
-│   ├── Three.js 3D      ├── Chart.js                                 │
-│   ├── main.js          ├── KPIs ao vivo                             │
-│   ├── benchmark.js     ├── Scoreboard + Gráficos                    │
-│   └── WebSocket WS     └── Export CSV/JSON                          │
-└─────────────────────────────┬───────────────────────────────────────┘
-                              │ HTTP REST + WebSocket /ws
-┌─────────────────────────────▼───────────────────────────────────────┐
-│                     BACKEND (FastAPI + asyncio)                     │
-│                      Porta 8001 | Single Worker                     │
-│                                                                      │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
-│  │   World     │  │   Thinker    │  │   TournamentRunner       │  │
-│  │  (Motor)    │  │ (Orquestrador│  │  (auto-lifecycle)        │  │
-│  │  20×20 grid │  │  de decisões)│  │  leaderboard + finalize  │  │
-│  └──────┬──────┘  └──────┬───────┘  └──────────────────────────┘  │
-│         │                │                                           │
-│  ┌──────▼──────────────────▼────────────────────────────────────┐  │
-│  │                    Agent                                      │  │
-│  │  vitals   inventory   can_think()   token_budget              │  │
-│  │  AgentMemory: short_term + episodic + relational + benchmark  │  │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌──────────────┐  ┌────────────────────────────────────────────┐  │
-│  │   Profiles   │  │         AI Adapters                        │  │
-│  │ 6 perfis IA  │  │  GeminiAdapter  OpenAICompatibleAdapter     │  │
-│  └──────────────┘  └────────────────┬───────────────────────────┘  │
-│                                     │                                │
-└─────────────────────────────────────┼────────────────────────────── ┘
-                                      │ HTTPS
-┌─────────────────────────────────────▼───────────────────────────────┐
-│                        PROVIDERS DE IA                               │
-│  Google Gemini API           OmniRouter (http://localhost:20128)    │
-│  gemini-2.5-flash-lite       → Gemini, GPT-4o-mini, Llama, Claude  │
-└──────────────────────────────────────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────────────┐
-│                       STORAGE (SQLite WAL)                          │
-│  ilhadaia.db                                                         │
-│  ├── sessions          (criação, encerramento, winner)              │
-│  ├── agent_scores      (scoreboard multi-sessão)                    │
-│  ├── world_settings_history                                          │
-│  ├── agent_memories    (memória persistente entre sessões)          │
-│  └── webhooks          (URLs + eventos + HMAC secret)               │
-│                                                                      │
-│  logs/*.ndjson         (decision log por sessão)                    │
-│  data/replays/*.ndjson (snapshots a cada 5 ticks)                   │
-└──────────────────────────────────────────────────────────────────────┘
+```text
+Browser
+  |\
+  | +--> /frontend/index.html
+  | +--> /frontend/dashboard.html
+  | +--> /frontend/models.html
+  |
+  +----> REST + WebSocket (/ws)
+            |
+            v
+        FastAPI app
+            |
+            +--> World (simulacao)
+            +--> Thinker (orquestracao de IA)
+            +--> TournamentRunner
+            +--> SessionStore / MemoryStore / ReplayStore / DecisionLog / WebhookManager
+            |
+            v
+      Gemini API ou providers OpenAI-compatible via OmniRoute
 ```
 
----
+## Componentes principais
 
-## Módulos do Backend
+### `backend/main.py`
 
-### `world.py` — Motor de Simulação
-- Grid 20×20 com BFS pathfinding
-- Ciclo dia/noite, zumbis, desintegração solar
-- Distribuição de turnos por `ai_interval`
-- Broadcast de eventos via WebSocket
+Responsabilidades:
 
-### `agent.py` — Agente IA
-- Vitals: hp, hunger, thirst, friendship
-- Budget: `token_budget`, `tokens_used`, `cooldown_ticks`, `can_think()`
-- Memória: `AgentMemory` (4 camadas, T10)
-- Benchmark: score, decisions_made, cost_usd, invalid_actions
+- inicializar a aplicacao FastAPI
+- montar `StaticFiles` em `/frontend`
+- criar e encerrar sessao ativa via lifespan
+- expor endpoints REST e WebSocket
+- rodar o `world_loop()` e disparar snapshots, score e webhooks
 
-### `runtime/thinker.py` — Orquestrador
-1. Verifica `can_think()` (budget + cooldown)
-2. Constrói contexto (world state + memória relevante via T21)
-3. Chama adapter (Gemini ou OmniRouter)
-4. Valida resposta com `ActionDecision` (T11)
-5. Atualiza memória e benchmark
-6. Loga decisão em NDJSON (T03)
+Estado global mantido aqui:
 
-### `runtime/memory.py` — AgentMemory (T10)
-| Camada | Tipo | Limite |
-|--------|------|--------|
-| `short_term` | Ações recentes | deque max 10 |
-| `episodic` | Eventos marcantes (morte, ataque, aliança) | max 50 |
-| `relational` | Opiniões sobre outros agentes (-1..+1) | sem limite |
-| `benchmark` | Métricas de performance | dict herdado do Agent |
+- `world`
+- `_current_session_id`
+- `TOURNAMENTS`
+- instancias de `DecisionLog`, `SessionStore`, `ReplayStore`, `MemoryStore`, `WebhookManager`
 
-### `runtime/relevance.py` — Busca Episódica (T21)
-- TF-IDF simplificado + pesos por tipo de evento
-- Decaimento temporal exponencial (`exp(-rate * ticks_ago)`)
-- Retorna top-K episódios mais relevantes para o contexto atual
-- Sem dependências externas (sem ChromaDB)
+### `backend/world.py`
 
-### `runtime/tournament_runner.py` — TournamentRunner (T20)
-- Loop assíncrono que verifica todos os torneios ativos a cada 10s
-- Finaliza automaticamente quando `duration_ticks` é atingido
-- Calcula leaderboard final (score + alive + decisions)
-- Suporte a `reset_on_finish`
+Responsabilidades:
 
-### `storage/` — Persistência
-| Módulo | Tecnologia | O que armazena |
-|--------|-----------|----------------|
-| `session_store.py` | SQLite WAL | sessões, scores, world_settings |
-| `decision_log.py` | NDJSON | decisões de IA por sessão |
-| `replay_store.py` | NDJSON | snapshots por tick (a cada 5) |
-| `memory_store.py` | SQLite WAL | AgentMemory serializada por owner |
-| `webhook_manager.py` | SQLite WAL | URLs, eventos, fire_count |
+- manter o `WorldState`
+- executar `tick()`
+- controlar ciclo dia/noite, morte, zumbis e respawn
+- resetar o elenco inicial
+- serializar o estado enviado ao frontend e ao replay
 
----
+Detalhe importante desta branch:
 
-## Fluxo de uma Decisão de IA
+- os NPCs iniciais sao resetados com perfis gratuitos: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`
 
+### `backend/runtime/thinker.py`
+
+Responsabilidades:
+
+- resolver o perfil do agente
+- instanciar o adapter correto
+- montar contexto + memoria relevante
+- validar structured output via `ActionDecision`
+- registrar decisao em `DecisionLog`
+
+Fallback atual:
+
+- perfil default e fallback tecnico: `claude-kiro`
+
+### `backend/runtime/profiles.py`
+
+Catalogo builtin de 8 perfis.
+
+Dois grupos existem hoje:
+
+- `provider="omnirouter"`: todos usam o mesmo `OMNIROUTER_URL`, mudando apenas `model`
+- `provider="gemini"`: usa `GEMINI_API_KEY` diretamente (`gemini-native`)
+
+### `backend/storage/*`
+
+- `session_store.py`: sessoes e scoreboard historico em SQLite
+- `memory_store.py`: memoria persistente para agentes com `owner_id`
+- `replay_store.py`: snapshots NDJSON por sessao
+- `decision_log.py`: NDJSON de decisoes por sessao
+- `webhook_manager.py`: cadastro e disparo de webhooks
+
+## Frontend
+
+### `frontend/index.html`
+
+- observer da ilha
+- usa WebSocket para estado ao vivo
+- HUD de benchmark agora pode ser arrastado e recolhido
+- ganhou navegacao global para `dashboard.html` e `models.html`
+
+### `frontend/dashboard.html`
+
+- analise de sessoes
+- consultas de scoreboard e exportacoes
+- navegacao consistente com as demais paginas
+
+### `frontend/models.html`
+
+- lista perfis retornados por `/profiles`
+- testa modelos individualmente
+- registra novos agentes via `POST /agents/register`
+- exibe agentes ativos com dados de benchmark
+
+## Fluxo de uma sessao
+
+```text
+startup
+  -> criar SessionStore/DecisionLog/ReplayStore
+  -> create_session()
+  -> world.reset_agents()
+  -> iniciar world_loop()
+
+world_loop()
+  -> world.tick()
+  -> upsert scores periodicamente
+  -> maybe_snapshot()
+  -> broadcast websocket
+  -> disparar webhooks assincronos
 ```
-tick N
-  └─ World seleciona agente (por ai_interval ou paralelo)
-      └─ agent.can_think()? (budget + cooldown)
-          └─ Thinker.think(agent, world_context)
-              ├─ Relevance.get_relevant(episodes, context, tick)
-              ├─ SchemaPrompt = ActionDecision.get_json_schema_prompt()
-              ├─ Adapter.complete(messages) → raw_response
-              ├─ ActionDecision.from_dict(parsed_json) → validação Pydantic
-              ├─ agent.agent_memory.add_short_term(action, thought, result)
-              ├─ agent.update_benchmark(tokens, cost, latency)
-              └─ DecisionLog.log(session, agent, action, tokens)
-```
 
----
+## Artefatos de runtime
 
-## Rate Limiting (T18)
+Com o comando recomendado (`cd backend && uvicorn main:app ...`), o runtime gera:
 
-Implementado via `slowapi` com chave por IP:
+- `backend/data/ilhadaia.db`
+- `backend/data/replays/*.replay.ndjson`
+- `backend/logs/*.ndjson`
+- `backend/hall_of_fame.json`
+- `backend/world_settings.json`
 
-| Endpoint | Limite |
-|----------|--------|
-| `POST /agents/register` | 10 req/min |
-| `POST /tournaments` | 5 req/min |
-| `POST /webhooks/register` | 20 req/hora |
+Esses arquivos nao fazem mais parte do versionamento.
 
----
+## Limitacoes conhecidas
 
-## Sistema de Webhooks (T24)
+- `ConnectionManager` em memoria: continua single-worker
+- `main.py` segue concentrando muita responsabilidade
+- paths de storage dependem do backend ser iniciado a partir de `backend/`
+- `webhook_manager` e `session_store` compartilham o mesmo SQLite local
 
-```
-Evento (death/win/zombie/tournament_end)
-  └─ WebhookManager.fire_event(event_type, payload)
-      └─ Para cada webhook registrado que escuta esse evento:
-          ├─ Monta body JSON: { event, timestamp, payload }
-          ├─ Assina com HMAC-SHA256 se secret configurado
-          └─ POST async (httpx, timeout=5s)
-```
+## Direcao recomendada
 
----
+A proxima modularizacao continua sendo:
 
-## Limitações Conhecidas
+- separar API de simulacao
+- tirar estado global de `main.py`
+- preparar um manager de broadcast desacoplado do processo local
 
-| Limitação | Status | Plano |
-|-----------|--------|-------|
-| Single worker (não escala horizontalmente) | Ativo | T17 (Redis pub/sub — Backlog) |
-| Frontend via `file://` tem CORS `null` habilitado | Ativo, controlado | Produção via nginx |
-| SQLite não é adequado para >1000 writes/seg | Não é o caso | Usar WAL, ok para escala atual |
-
----
-
-## Dependências
-
-```
-fastapi, uvicorn          # Framework web + ASGI
-pydantic                  # Validação de schemas
-python-dotenv             # Config por env
-google-genai              # Adapter Gemini nativo
-openai                    # Adapter OmniRouter/OpenAI-compat
-slowapi                   # Rate limiting
-httpx                     # HTTP async para webhooks
-pytest                    # Testes unitários (31 casos)
-```
+Esses passos estao detalhados em `docs/TARGET_ARCHITECTURE.md`.

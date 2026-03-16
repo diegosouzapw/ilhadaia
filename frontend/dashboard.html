@@ -42,7 +42,7 @@
     header h1 {
       font-size: 1.6rem; font-weight: 900;
       background: linear-gradient(90deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
     }
     .header-sub { font-size: .8rem; color: var(--muted); margin-top: 2px; }
     .header-actions { display: flex; gap: 12px; }
@@ -168,7 +168,11 @@
     <div class="header-sub">Análise de sessões, comparação de modelos IA e performance em tempo real</div>
   </div>
   <div class="header-actions">
-    <button class="btn btn-outline" onclick="window.location='index.html'">↩ Voltar ao Jogo</button>
+    <nav style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:5px 10px;backdrop-filter:blur(6px)">
+      <a href="index.html"     style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
+      <a href="dashboard.html" style="text-decoration:none;color:#ffd740;font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;background:rgba(255,215,64,.12)">📊 Dashboard</a>
+      <a href="models.html"    style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🤖 Modelos</a>
+    </nav>
     <button class="btn btn-primary" onclick="loadAll()">🔄 Atualizar</button>
   </div>
 </header>

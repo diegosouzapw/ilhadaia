@@ -1,103 +1,69 @@
-# 📋 BACKLOG — BBBia Versão Turbinada
+# Backlog
 
-> Versão: v0.5 | Data: Março 2026
-> Tasks T01–T16 + T18–T24 implementadas. Apenas T17 permanece como backlog.
+Este backlog foi reduzido para o que realmente continua em aberto depois desta branch. Nao inclui mais artefatos de runtime nem divergencias entre docs e codigo, porque esses pontos foram saneados aqui.
 
----
+## Prioridade alta
 
-## ⏳ T17 — Redis WebSocket (Backlog)
+### 1. Broadcast multi-worker
 
-**Versão planejada:** v0.6  
-**Prioridade:** Média-Alta  
-**Esforço estimado:** 4–6 horas  
-**Pré-requisito:** Redis instalado e acessível (serviço externo)
+Problema atual:
 
-### Contexto
-O backend atual usa um `ConnectionManager` em memória para broadcast dos WebSocket. Isso funciona bem para **single worker**, mas impede escala horizontal (múltiplas réplicas uvicorn).
+- o `ConnectionManager` ainda vive em memoria dentro de um unico processo
+- com mais de um worker, cada processo teria sua propria lista de conexoes
 
-### Proposta de Implementação
+Caminho sugerido:
 
-**Dependências:**
-```
-redis>=5.0
-aioredis>=2.0
-```
+- introduzir um barramento de eventos entre processos
+- Redis pub/sub continua sendo a opcao mais simples
+- separar transporte WebSocket de geracao de eventos do mundo
 
-**Arquivo novo:** `backend/messaging/redis_pubsub.py`
+## Prioridade media
 
-```python
-import redis.asyncio as aioredis
-import asyncio, json
+### 2. Modularizar `backend/main.py`
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-CHANNEL = "bbbia:world_events"
+Problema atual:
 
-class RedisPubSubManager:
-    async def connect(self): ...
-    async def publish(self, message: dict): ...
-    async def subscribe(self, ws): ...
-```
+- `main.py` concentra lifespan, rotas, loop do mundo, exportacoes e webhooks
 
-**Mudanças em `main.py`:**
-- Substituir `ConnectionManager.broadcast()` por `RedisPubSubManager.publish()`
-- `world_loop()` publica no canal Redis
-- Cada worker consome do canal e envia aos seus WebSockets locais
+Caminho sugerido:
 
-**`docker-compose.yml`:**
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-```
+- mover rotas para modulos dedicados
+- extrair `world_loop()` e orchestration para modulos independentes
+- reduzir estado global compartilhado
 
-### Critério de Aceite
-- [ ] Dois workers uvicorn simultâneos recebem o mesmo evento pelo Redis
-- [ ] Falha do Redis retorna ao broadcast em memória graciosamente
-- [ ] Métricas de latência não degradam (< +5ms no P95)
+### 3. Tornar storage independente do diretorio de execucao
 
----
+Problema atual:
 
-## 💡 Ideias Futuras (Não Priorizadas)
+- os paths de `data/` e `logs/` funcionam como esperado quando o backend sobe a partir de `backend/`
 
-| Ideia | Complexidade | Impacto |
-|-------|-------------|---------|
-| Vector store para episódic memory (ChromaDB) | Alta | Médio |
-| Web scraping de context externo por agente | Alta | Médio |
-| Streaming de respostas da IA (SSE) | Média | Alto |
-| Modo Espectador com câmera seguindo agente | Média | Alto |
-| Multi-ilha (múltiplos worlds paralelos) | Muito Alta | Alto |
-| Ranking ELO entre modelos | Baixa | Alto |
-| Interface admin para gerenciar torneios ao vivo | Média | Médio |
-| Mobile-first no dashboard | Baixa | Médio |
+Caminho sugerido:
 
----
+- resolver paths a partir de `__file__` ou configuracao explicita
+- permitir boot a partir da raiz sem ambiguidade de arquivos gerados
 
-## Estrutura Atual (v0.5)
+## Prioridade baixa
 
-```
-backend/
-├── main.py               ← 700+ linhas, 30+ endpoints
-├── agent.py              ← AgentMemory integrada
-├── runtime/
-│   ├── thinker.py        ← Orquestrador AI
-│   ├── profiles.py       ← 6 perfis
-│   ├── memory.py         ← 4 camadas
-│   ├── schemas.py        ← ActionDecision
-│   ├── relevance.py      ← TF-IDF episódico
-│   └── tournament_runner.py
-├── storage/
-│   ├── session_store.py  ← SQLite WAL
-│   ├── decision_log.py   ← NDJSON
-│   ├── replay_store.py   ← Snapshots
-│   ├── memory_store.py   ← Memória persistente
-│   └── webhook_manager.py ← Notificações HMAC
-└── tests/
-    └── test_engine.py    ← 31/31 ✅
+### 4. Melhorar a estrategia de smoke test
 
-frontend/
-├── index.html            ← 3D + HUD + Replay + Timeline
-├── dashboard.html        ← Dashboard analítico
-├── benchmark.js
-└── style.css
-```
+O projeto ja tem uma suite util de backend, mas ainda falta uma verificacao integrada leve para:
+
+- boot do FastAPI
+- carga das tres paginas em `/frontend`
+- conexao WebSocket
+- criacao de sessao limpa em ambiente zerado
+
+### 5. Evoluir a observabilidade
+
+Possiveis ganhos:
+
+- metricas Prometheus
+- tracing de chamadas a providers
+- painel de saude para rate limiting e webhooks
+
+## Itens explicitamente resolvidos nesta branch
+
+- frontend servido pelo backend em `/frontend/*`
+- runtime state fora do versionamento
+- tela `models.html` integrada ao catalogo de perfis do backend
+- default tecnico e operacional migrado para `claude-kiro`

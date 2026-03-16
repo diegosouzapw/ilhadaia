@@ -80,7 +80,7 @@ class TournamentRunner:
                 leaderboard.append({
                     "agent_id": agent.id,
                     "agent_name": agent.name,
-                    "profile_id": getattr(agent, "profile_id", "gemini-native"),
+                    "profile_id": getattr(agent, "profile_id", "claude-kiro"),
                     "score": agent.benchmark.get("score", 0.0),
                     "tokens_used": getattr(agent, "tokens_used", 0),
                     "decisions_made": agent.benchmark.get("decisions_made", 0),
@@ -117,7 +117,7 @@ class TournamentRunner:
             live.append({
                 "agent_id": agent.id,
                 "agent_name": agent.name,
-                "profile_id": getattr(agent, "profile_id", "gemini-native"),
+                "profile_id": getattr(agent, "profile_id", "claude-kiro"),
                 "score": agent.benchmark.get("score", 0.0),
                 "tokens_used": getattr(agent, "tokens_used", 0),
                 "decisions_made": agent.benchmark.get("decisions_made", 0),

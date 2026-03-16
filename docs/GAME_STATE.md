@@ -110,7 +110,7 @@ Cada agente tem sua entrada em `agent_scores` (SQLite WAL) atualizada por sessã
 |-------|-----------|
 | `agent_name` | Nome do agente |
 | `model` | Modelo de IA usado |
-| `profile_id` | Perfil (gemini-native, balanced...) |
+| `profile_id` | Perfil de execucao do agente (ex.: `claude-kiro`, `kimi-thinking`) |
 | `score_total` | Pontuação acumulada |
 | `tokens_used` | Total de tokens consumidos |
 | `cost_usd` | Custo estimado em dólares |

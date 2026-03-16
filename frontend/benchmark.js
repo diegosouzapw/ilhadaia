@@ -243,9 +243,122 @@ function applyReplayFrame(index) {
 // Inicializa o painel de replay quando a página carregar
 window.addEventListener('DOMContentLoaded', () => {
     setTimeout(initReplayPanel, 2000); // espera 2s para o backend subir
+    initBenchmarkDrag();
+    restoreBenchmarkPosition();
 });
 
 // Fechar modal com ESC
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeAgentModal();
 });
+
+// ─── Drag & Drop do Benchmark HUD ────────────────────────────────────────────
+
+function initBenchmarkDrag() {
+    const hud    = document.getElementById('benchmark-hud');
+    const handle = document.getElementById('benchmark-drag-handle');
+    if (!hud || !handle) return;
+
+    // Garantir pointer-events na alça
+    hud.style.pointerEvents = 'auto';
+
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    let origLeft = 0, origTop = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+        // Ignorar clique no botão de colapso
+        if (e.target.classList.contains('bm-collapse-btn')) return;
+
+        e.preventDefault();
+        isDragging = true;
+
+        const rect = hud.getBoundingClientRect();
+        // Converter para posição left/top se estiver usando right/bottom
+        hud.style.right  = 'auto';
+        hud.style.bottom = 'auto';
+        hud.style.left   = rect.left + 'px';
+        hud.style.top    = rect.top  + 'px';
+        hud.style.borderRadius = '8px';
+
+        origLeft = rect.left;
+        origTop  = rect.top;
+        startX   = e.clientX;
+        startY   = e.clientY;
+
+        hud.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        let newLeft = origLeft + dx;
+        let newTop  = origTop  + dy;
+
+        // Manter dentro da tela
+        const maxLeft = window.innerWidth  - hud.offsetWidth;
+        const maxTop  = window.innerHeight - hud.offsetHeight;
+        newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        newTop  = Math.max(0, Math.min(newTop,  maxTop));
+
+        hud.style.left = newLeft + 'px';
+        hud.style.top  = newTop  + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        hud.classList.remove('dragging');
+        // Salvar posição
+        localStorage.setItem('bm_hud_left', hud.style.left);
+        localStorage.setItem('bm_hud_top',  hud.style.top);
+    });
+
+    // Touch support (mobile)
+    handle.addEventListener('touchstart', (e) => {
+        if (e.target.classList.contains('bm-collapse-btn')) return;
+        const touch = e.touches[0];
+        const rect  = hud.getBoundingClientRect();
+        hud.style.right = 'auto'; hud.style.left = rect.left + 'px';
+        hud.style.bottom = 'auto'; hud.style.top = rect.top + 'px';
+        hud.style.borderRadius = '8px';
+        origLeft = rect.left; origTop = rect.top;
+        startX = touch.clientX; startY = touch.clientY;
+        isDragging = true;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        hud.style.left = (origLeft + touch.clientX - startX) + 'px';
+        hud.style.top  = (origTop  + touch.clientY - startY) + 'px';
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => { isDragging = false; });
+}
+
+function restoreBenchmarkPosition() {
+    const hud  = document.getElementById('benchmark-hud');
+    const left = localStorage.getItem('bm_hud_left');
+    const top  = localStorage.getItem('bm_hud_top');
+    if (hud && left && top) {
+        hud.style.right  = 'auto';
+        hud.style.left   = left;
+        hud.style.top    = top;
+        hud.style.borderRadius = '8px';
+    }
+}
+
+// ─── Colapsar / Expandir ──────────────────────────────────────────────────────
+
+function toggleBenchmarkCollapse() {
+    const body = document.getElementById('benchmark-hud-body');
+    const btn  = document.querySelector('.bm-collapse-btn');
+    if (!body) return;
+
+    const isCollapsed = body.style.display === 'none';
+    body.style.display  = isCollapsed ? '' : 'none';
+    if (btn) btn.textContent = isCollapsed ? '▾' : '▸';
+}

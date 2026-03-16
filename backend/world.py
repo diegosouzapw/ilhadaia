@@ -991,7 +991,7 @@ class World:
                         int(getattr(a, "cooldown_ticks", 0))
                         - (self.ticks - int(getattr(a, "last_thought_tick", -99))),
                     ),
-                    "profile_id": getattr(a, "profile_id", "gemini-native"),
+                    "profile_id": getattr(a, "profile_id", "claude-kiro"),
                     "owner_id": getattr(a, "owner_id", ""),
                     "benchmark": getattr(a, "benchmark", {}),
                     "cost_usd": float(getattr(a, "benchmark", {}).get("cost_usd", 0.0)),
@@ -1031,7 +1031,13 @@ class World:
             AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", 17, 2),
             AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", 2, 17)
         ]
-        
+
+        # Atribui um perfil de IA diferente para cada personagem default
+        # Todos usam o mesmo endpoint OmniRoute — só o modelo muda.
+        _default_profiles = ["claude-kiro", "kimi-thinking", "kimi-groq", "claude-haiku"]
+        for i, agent in enumerate(squad):
+            agent.profile_id = _default_profiles[i % len(_default_profiles)]
+
         # Add only the first N players selected
         for i in range(min(player_count, len(squad))):
             self.add_agent(squad[i])

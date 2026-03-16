@@ -167,14 +167,14 @@ class TestProfiles:
 
     def test_get_profile_known(self):
         from runtime.profiles import get_profile
-        p = get_profile("balanced")
-        assert p.profile_id == "balanced"
+        p = get_profile("claude-kiro")
+        assert p.profile_id == "claude-kiro"
         assert p.provider == "omnirouter"
 
     def test_get_profile_unknown_returns_default(self):
         from runtime.profiles import get_profile
         p = get_profile("nonexistent-model")
-        assert p.profile_id == "gemini-native"
+        assert p.profile_id == "claude-kiro"
 
     def test_profiles_have_required_fields(self):
         from runtime.profiles import BUILTIN_PROFILES
@@ -319,12 +319,12 @@ class TestSessionStore:
         agent = SimpleNamespace(
             id="a1",
             name="TestAgent",
-            profile_id="balanced",
+            profile_id="claude-kiro",
             benchmark={"score": 42.0, "decisions_made": 10, "cost_usd": 0.01,
                        "ticks_survived": 5, "invalid_actions": 0},
             tokens_used=500,
             owner_id="owner1",
-            model_name="gemini/gemini-2.5-flash",
+            model_name="kr/claude-sonnet-4.5",
             provider="omnirouter",
         )
         self.store.upsert_agent_score(sid, agent)

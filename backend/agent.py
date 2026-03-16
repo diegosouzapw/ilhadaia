@@ -50,7 +50,7 @@ class Agent:
         self.tokens_used: int = 0           # tokens consumidos na sessão
         self.cooldown_ticks: int = 3        # ticks mínimos entre pensamentos
         self.last_thought_tick: int = -99   # último tick que chamou a IA
-        self.profile_id: str = "gemini-native"  # perfil de IA usado
+        self.profile_id: str = "claude-kiro"  # perfil de IA usado
         self.owner_id: str = ""             # owner externo (se houver)
 
         # ── Benchmark Tracking ───────────────────────────────────────────────

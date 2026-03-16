@@ -31,8 +31,61 @@ body, html {
 }
 
 /* Individual UI elements must enable pointer events */
-#top-bar, #status-panel, #chat-panel, #inventories, #victory-overlay, #chat-filters, .filter-btn, #reset-btn, #time-display, #tick-interval-selector, #controls-panel {
+#top-bar, #status-panel, #chat-panel, #inventories, #victory-overlay, #chat-filters, .filter-btn, #reset-btn, #time-display, #tick-interval-selector, #controls-panel, #global-nav {
     pointer-events: auto;
+}
+
+/* ── Nav Global Flutuante (Ilha) ──────────────────────────────────────── */
+#global-nav {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 5px 10px 5px 8px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+#global-nav-logo {
+    font-size: 13px;
+    font-weight: 900;
+    color: #ffeb3b;
+    padding-right: 8px;
+    border-right: 1px solid rgba(255,255,255,0.15);
+    margin-right: 4px;
+    font-family: 'Press Start 2P', cursive;
+    letter-spacing: -1px;
+}
+#global-nav-links {
+    display: flex;
+    gap: 4px;
+}
+.gnav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 11px;
+    border-radius: 7px;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+    color: rgba(255,255,255,0.7);
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.gnav-link:hover {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+}
+.gnav-link.gnav-active {
+    background: rgba(255,235,59,0.18);
+    color: #ffeb3b;
+    font-weight: 700;
 }
 
 h1 {
@@ -359,29 +412,66 @@ h1 {
    T16: HUD de Benchmark & Replay
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* HUD de Benchmark — lateral direita */
+/* HUD de Benchmark — arrastável, posição inicial canto superior direito */
 #benchmark-hud {
     position: fixed;
     right: 0;
     top: 60px;
     width: 300px;
-    background: rgba(10, 10, 15, 0.9);
-    border-left: 2px solid #333;
+    background: rgba(10, 10, 15, 0.92);
+    border: 1px solid #333;
+    border-radius: 8px 0 0 8px;
     color: #e0e0e0;
-    padding: 12px;
     font-size: 12px;
     z-index: 1000;
-    max-height: 45vh;
-    overflow-y: auto;
+    max-height: 50vh;
+    overflow: hidden;
     backdrop-filter: blur(8px);
+    box-shadow: -4px 4px 20px rgba(0,0,0,0.5);
+    transition: box-shadow 0.15s, opacity 0.2s;
+    user-select: none;
 }
-#benchmark-hud h3 {
+#benchmark-hud.dragging {
+    box-shadow: -4px 8px 30px rgba(0,0,0,0.7);
+    opacity: 0.95;
+}
+/* Alça de arrastar */
+#benchmark-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px 6px;
+    cursor: grab;
+    border-bottom: 1px solid #2a2a2a;
+    background: rgba(255, 152, 0, 0.08);
+}
+#benchmark-drag-handle:active { cursor: grabbing; }
+#benchmark-drag-handle h3 {
     color: #ff9800;
-    margin: 0 0 10px 0;
-    font-size: 13px;
+    margin: 0;
+    font-size: 12px;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
+.bm-drag-icon { color: #555; font-size: 14px; cursor: grab; }
+.bm-collapse-btn {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 2px;
+    transition: color 0.15s;
+    line-height: 1;
+}
+.bm-collapse-btn:hover { color: #ff9800; }
+/* Corpo do HUD */
+#benchmark-hud-body {
+    padding: 8px 10px 10px;
+    overflow-y: auto;
+    max-height: calc(50vh - 38px);
+}
+#benchmark-hud h3 { display: none; } /* Esconde h3 antigo — agora está na handle */
 #benchmark-table {
     width: 100%;
     border-collapse: collapse;
@@ -437,6 +527,8 @@ tr.agent-dead td {
 }
 .score-cell { color: #ffeb3b; font-weight: bold; }
 .hp-badge { font-weight: bold; }
+.session-id-cell { color: #555; font-size: 10px; margin-top: 6px; }
+
 
 /* Painel de Replay — lateral esquerda inferior */
 #replay-panel {

@@ -1,136 +1,88 @@
-# 📊 Estado Atual do Projeto — BBBia Versão Turbinada
+# Estado Atual do Projeto
 
-> Revisão: Março 2026 | Versão: **v0.5 Turbinada** | Status: **Produção**
+Data desta revisao: marco de 2026.
 
----
+## Resumo executivo
 
-## Resumo Executivo
+O projeto esta funcional como um simulador local de agentes com benchmark de modelos e tres interfaces web servidas pelo backend. O maior ganho desta branch nao foi adicionar uma feature de gameplay, e sim fechar o ciclo operacional:
 
-O BBBia evoluiu de um protótipo de simulação social para uma **plataforma completa de benchmark de agentes de IA**. Todas as tasks do roadmap v0.2–v0.5 (T01–T16 + T18–T24) foram implementadas. Apenas T17 (Redis pub/sub) permanece no backlog por requerer um serviço externo.
+- defaults de perfil alinhados para uso gratuito
+- docs reconciliadas com o codigo real
+- artefatos de runtime removidos do versionamento
+- app pronta para recriar estado do zero em um boot limpo
 
----
+## Estado validado
 
-## O Que Foi Implementado
+### Backend
 
-### Backend (FastAPI + SQLite)
+- FastAPI sobe a API principal em `backend/main.py`
+- `StaticFiles` serve `frontend/` em `/frontend`
+- `Thinker` coordena chamadas de IA
+- `SessionStore`, `ReplayStore`, `DecisionLog`, `MemoryStore` e `WebhookManager` continuam ativos
+- fallback de perfil foi migrado para `claude-kiro`
 
-| Componente | Status | Descrição |
-|-----------|--------|-----------|
-| `main.py` | ✅ | 700+ linhas, 30+ endpoints, lifespan com todos os módulos |
-| `agent.py` | ✅ | AgentMemory 4 camadas, budget, cooldown, can_think() |
-| `runtime/thinker.py` | ✅ | Orquestrador central com validação Pydantic |
-| `runtime/profiles.py` | ✅ | 6 perfis: gemini-native, cheap-fast, balanced, smart, oss-fast, creative |
-| `runtime/memory.py` | ✅ | AgentMemory: short_term, episodic, relational, benchmark |
-| `runtime/schemas.py` | ✅ | ActionDecision Pydantic com validação de action/intent |
-| `runtime/relevance.py` | ✅ | TF-IDF episódico + decaimento temporal (sem ChromaDB) |
-| `runtime/tournament_runner.py` | ✅ | Auto-gestão de ciclo de vida de torneios |
-| `runtime/adapters/` | ✅ | GeminiAdapter + OpenAICompatibleAdapter (OmniRouter) |
-| `storage/session_store.py` | ✅ | SQLite WAL: sessions, agent_scores, world_settings |
-| `storage/decision_log.py` | ✅ | NDJSON de decisões por sessão |
-| `storage/replay_store.py` | ✅ | Snapshots a cada 5 ticks |
-| `storage/memory_store.py` | ✅ | Memória AgentMemory persistente entre sessões |
-| `storage/webhook_manager.py` | ✅ | Notificações push com HMAC-SHA256 |
-| `tests/test_engine.py` | ✅ | 31/31 testes pytest passando |
+### Perfis
+
+Total atual: `8` perfis builtin.
+
+Default operacional:
+
+- registro de agente: `claude-kiro`
+- fallback tecnico: `claude-kiro`
+- squad inicial da ilha: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`
 
 ### Frontend
 
-| Arquivo | Status | Descrição |
-|---------|--------|-----------|
-| `frontend/index.html` | ✅ | Three.js 3D + HUD Benchmark + Replay + Timeline de Eventos + Modal |
-| `frontend/dashboard.html` | ✅ | Dashboard analítico: KPIs + Chart.js + Scoreboard + Export |
-| `frontend/benchmark.js` | ✅ | Lógica JS do HUD, replay e modal |
-| `frontend/main.js` | ✅ | Three.js + WebSocket + handler de eventos |
-| `frontend/style.css` | ✅ | Estilos dark mode dos novos painéis |
+Interfaces oficiais:
 
----
+- `index.html`
+- `dashboard.html`
+- `models.html`
 
-## Endpoints Ativos (30+)
+Observacoes:
 
-```
-GET  /                              Status da engine
-GET  /system/info                   Versão + módulos ativos
-GET  /profiles                      6 perfis de IA
-GET  /rate-limit/status             Status do rate limiting
-POST /agents/register               Registra agente externo
-GET  /agents/{id}/state             Estado + memória + benchmark
-GET  /agent/{id}/context            Contexto perceptivo
-POST /agent/{id}/action             Ação manual
-DELETE /agent/{id}        🔒        Remove agente
-POST /join                          Agente remoto legado
-GET  /world/scoreboard              Placar global
-GET  /world/scoreboard/export       Export CSV/JSON
-GET  /sessions                      Histórico SQLite
-GET  /sessions/{id}/replay          Frames de replay
-GET  /sessions/{id}/export          Export CSV/JSON
-GET  /sessions/{id}/decisions/export Export decisions NDJSON
-POST /tournaments          🔒       Cria torneio
-POST /tournaments/{id}/join         Entra no torneio
-POST /tournaments/{id}/start 🔒    Inicia torneio
-GET  /tournaments/{id}/status       Status detalhado
-GET  /tournaments/{id}/leaderboard  Leaderboard ao vivo/final
-GET  /tournaments                   Lista torneios
-GET  /memories                      Agentes com memória persistente
-POST /memories/save/{id}            Salva memória
-DELETE /memories/{o}/{n}  🔒       Remove memória
-POST /webhooks/register             Registra webhook
-GET  /webhooks/{owner_id}           Lista webhooks
-DELETE /webhooks/{id}               Remove webhook
-POST /webhooks/test/{id}   🔒      Testa webhook
-POST /reset                🔒      Reset do jogo
-POST /settings/ai_interval 🔒      Intervalo IA
-WS   /ws                           WebSocket ao vivo
+- `models.html` esta integrada a `GET /profiles`
+- a navegacao entre as tres paginas esta consistente
+- o HUD de benchmark na ilha pode ser movido e recolhido
+
+## Persistencia e runtime
+
+Artefatos gerados em execucao:
+
+- `backend/data/ilhadaia.db`
+- `backend/data/replays/*.replay.ndjson`
+- `backend/logs/*.ndjson`
+- `backend/hall_of_fame.json`
+- `backend/world_settings.json`
+
+Estado apos esta limpeza:
+
+- esses arquivos nao estao mais versionados
+- o workspace foi resetado para que o backend recrie tudo a partir de zero
+
+## Validacao tecnica feita nesta continuacao
+
+Suite executada:
+
+```bash
+pytest backend/tests/test_engine.py -q
 ```
 
----
+Resultado observado:
 
-## Métricas de Validação
+- `33 passed in 3.91s`
 
-| Métrica | Valor |
-|---------|-------|
-| Ticks contínuos testados | 4.500+ |
-| Sessões SQLite | 4+ |
-| Entradas no scoreboard | 175+ |
-| Testes unitários | 31/31 ✅ |
-| Perfis de IA | 6 |
-| Endpoints REST ativos | 30+ |
-| Arquivos de docs | 17 |
-| Tasks implementadas | T01–T16, T18–T24 (23 tasks) |
+## Riscos remanescentes
 
----
+- `backend/main.py` continua centralizando muita responsabilidade
+- o manager de WebSocket ainda nao suporta escala horizontal
+- paths relativos de storage dependem do backend ser iniciado a partir de `backend/`
 
-## Pendências & Limitações
+## Conclusao
 
-| Item | Tipo | Plano |
-|------|------|-------|
-| T17: Redis pub/sub | Backlog | Quando houver necessidade de escala horizontal |
-| Single worker (não escala) | Limitação arquitetural | T17 resolve |
-| CORS `null` habilitado | Dev only | Produção → nginx com origin real |
-| agentes NPC sem owner_id não persistem memória | By design | Documentado |
+A branch agora esta em um estado coerente para abrir PR:
 
----
-
-## Estrutura de Arquivos (resumida)
-
-```
-ilhadaia/
-├── README.md                    ← Atualizado v0.5
-├── docker-compose.yml           ← Backend + nginx
-├── .env.example
-├── backend/
-│   ├── main.py                  ← Ponto central (700+ linhas)
-│   ├── agent.py                 ← Agente com AgentMemory
-│   ├── runtime/                 ← Motor de IA (6 módulos)
-│   ├── storage/                 ← Persistência (5 módulos)
-│   └── tests/                   ← 31 testes
-├── frontend/
-│   ├── index.html               ← Observer 3D turbinado
-│   └── dashboard.html           ← Dashboard analítico (novo)
-└── docs/
-    ├── API_REFERENCE.md         ← 30+ endpoints documentados
-    ├── ARCHITECTURE.md          ← Diagrama v0.5 completo
-    ├── IMPROVEMENT_PLAN.md      ← T01–T24 com status
-    ├── BACKLOG.md               ← T17 + ideias futuras
-    ├── DEVELOPMENT_GUIDE.md     ← Guia para contribuidores
-    ├── GAME_STATE.md            ← Lógica do jogo + benchmark
-    └── tasks/                   ← 24 arquivos de task (T01–T24)
-```
+- diff funcional organizado
+- docs alinhadas com o codigo
+- repositorio sem banco, WAL, replay e settings indevidamente versionados
+- setup padrao documentado com foco em perfis gratuitos

@@ -11,6 +11,17 @@
 </head>
 <body>
     <div id="ui-layer">
+
+        <!-- ── Nav Global Flutuante ── -->
+        <nav id="global-nav">
+            <div id="global-nav-logo">🌴 iA</div>
+            <div id="global-nav-links">
+                <a class="gnav-link gnav-active" href="index.html" title="Ilha (ao vivo)">🌴 Ilha</a>
+                <a class="gnav-link" href="dashboard.html" title="Dashboard analítico">📊 Dashboard</a>
+                <a class="gnav-link" href="models.html" title="Gerenciar modelos e agentes">🤖 Modelos</a>
+            </div>
+        </nav>
+
         <h1>👁️ BBBia: A Ilha da iA</h1>
         <div id="time-display">
             <div class="time-line">
@@ -103,23 +114,29 @@
 
     <!-- ═══ T16: HUD de Benchmark ═══════════════════════════════════════ -->
     <div id="benchmark-hud">
-        <h3>🏆 Benchmark ao Vivo</h3>
-        <table id="benchmark-table">
-            <thead>
-                <tr>
-                    <th>Agente</th>
-                    <th>Modelo</th>
-                    <th>Tokens</th>
-                    <th>Score</th>
-                    <th>HP</th>
-                </tr>
-            </thead>
-            <tbody id="benchmark-body">
-                <tr><td colspan="5" style="text-align:center;color:#666">Aguardando dados...</td></tr>
-            </tbody>
-        </table>
-        <div id="benchmark-session" style="margin-top:8px; font-size:10px; color:#666; border-top:1px solid #333; padding-top:4px;">
-            Session: <span id="session-id-display">-</span>
+        <div id="benchmark-drag-handle">
+            <span class="bm-drag-icon">⠿</span>
+            <h3>🏆 BENCHMARK AO VIVO</h3>
+            <button class="bm-collapse-btn" onclick="toggleBenchmarkCollapse()" title="Minimizar/Expandir">▾</button>
+        </div>
+        <div id="benchmark-hud-body">
+            <table id="benchmark-table">
+                <thead>
+                    <tr>
+                        <th>Agente</th>
+                        <th>Modelo</th>
+                        <th>Tokens</th>
+                        <th>Score</th>
+                        <th>HP</th>
+                    </tr>
+                </thead>
+                <tbody id="benchmark-body">
+                    <tr><td colspan="5" style="text-align:center;color:#666">Aguardando dados...</td></tr>
+                </tbody>
+            </table>
+            <div id="benchmark-session" style="margin-top:8px; font-size:10px; color:#666; border-top:1px solid #333; padding-top:4px;">
+                Session: <span id="session-id-display">-</span>
+            </div>
         </div>
     </div>
 

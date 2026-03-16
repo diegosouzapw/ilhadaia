@@ -25,33 +25,42 @@ wheels/
 venv/
 ENV/
 
-# Environment Variables
+# Environment Variables — nunca subir chaves reais
 .env
 backend/.env
+*.env.local
 
 # IDEs
 .vscode/
 .idea/
 
-# Game State & Runtime Data
+# Runtime State (gerado em execução)
 backend/hall_of_fame.json
 backend/world_settings.json
-
-# Database
-backend/data/*.db
-backend/data/*.db-shm
-backend/data/*.db-wal
-
-# Session Logs
+backend/data/
 backend/logs/
+data/
+logs/
 
-# Replays
-backend/data/replays/
+# Databases e WAL (gerados em execução)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# Replays e logs exportados
+*.ndjson
 
 # Tests
 .pytest_cache/
 **/.pytest_cache/
+.coverage
+htmlcov/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Node (OmniRoute etc.)
+node_modules/
+npm-debug.log*

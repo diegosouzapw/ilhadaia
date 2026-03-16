@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BBBia — Gerenciador de Modelos IA</title>
+  <meta name="description" content="Gerencie perfis de IA, teste modelos e controle agentes na ilha inteligente BBBia."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:      #08090d;
+      --bg2:     #10121a;
+      --bg3:     #181b26;
+      --bg4:     #1f2333;
+      --border:  #252838;
+      --accent:  #7c6fff;
+      --accent2: #00d4ff;
+      --green:   #00e676;
+      --red:     #ff4757;
+      --yellow:  #ffd740;
+      --orange:  #ff9f43;
+      --text:    #e2e8f0;
+      --muted:   #5a6480;
+      --glow:    0 0 24px rgba(124,111,255,.3);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #0c0e17, #15163a);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo h1 {
+      font-size: 1.4rem; font-weight: 900;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .logo-sub { font-size: .75rem; color: var(--muted); }
+    .nav-actions { display: flex; gap: 10px; align-items: center; }
+
+    /* ── Status pill ── */
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 20px;
+      background: rgba(0,230,118,.1); border: 1px solid rgba(0,230,118,.25);
+      font-size: .78rem; color: var(--green); font-weight: 600;
+    }
+    .status-pill.offline { background: rgba(255,71,87,.1); border-color: rgba(255,71,87,.25); color: var(--red); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulseGreen 2s infinite; }
+    .status-pill.offline .status-dot { background: var(--red); animation: none; }
+    @keyframes pulseGreen { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 8px 16px; border-radius: 8px; border: none;
+      font-size: .83rem; font-weight: 600; cursor: pointer;
+      transition: all .18s; font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #9a8fff; box-shadow: var(--glow); transform: translateY(-1px); }
+    .btn-outline { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-outline:hover { background: rgba(124,111,255,.12); }
+    .btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(255,71,87,.4); }
+    .btn-danger:hover { background: rgba(255,71,87,.12); }
+    .btn-sm { padding: 5px 11px; font-size: .77rem; }
+    .btn-green { background: var(--green); color: #000; }
+    .btn-green:hover { background: #33ff8e; box-shadow: 0 0 20px rgba(0,230,118,.3); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+
+    /* ── Layout ── */
+    .layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 61px); }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      overflow-y: auto;
+    }
+    .sidebar-section { padding: 0 20px 20px; }
+    .sidebar-title {
+      font-size: .7rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .1em;
+      margin-bottom: 12px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .profile-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px;
+      margin-bottom: 8px; cursor: pointer;
+      transition: all .18s;
+      position: relative; overflow: hidden;
+    }
+    .profile-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 3px; background: var(--accent);
+      transform: scaleY(0); transition: transform .18s;
+      border-radius: 0 2px 2px 0;
+    }
+    .profile-card:hover { border-color: var(--accent); }
+    .profile-card:hover::before { transform: scaleY(1); }
+    .profile-card.active { border-color: var(--accent); background: rgba(124,111,255,.08); }
+    .profile-card.active::before { transform: scaleY(1); }
+    .profile-name { font-size: .88rem; font-weight: 700; margin-bottom: 3px; }
+    .profile-model { font-size: .72rem; color: var(--accent2); font-family: monospace; }
+    .profile-meta { font-size: .7rem; color: var(--muted); margin-top: 4px; }
+    .provider-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px; border-radius: 4px; font-size: .67rem; font-weight: 600;
+      margin-top: 5px;
+    }
+    .provider-kiro  { background: rgba(255,159,67,.15); color: var(--orange); }
+    .provider-iflow { background: rgba(0,212,255,.15); color: var(--accent2); }
+    .provider-gc    { background: rgba(0,230,118,.15); color: var(--green); }
+    .provider-groq  { background: rgba(124,111,255,.2); color: var(--accent); }
+    .provider-gemini{ background: rgba(255,215,64,.15); color: var(--yellow); }
+    .provider-other { background: rgba(90,100,128,.2); color: var(--muted); }
+
+    /* ── Main ── */
+    .main { padding: 28px 32px; overflow-y: auto; }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; background: var(--bg2); border-radius: 10px; padding: 4px; border: 1px solid var(--border); }
+    .tab { flex: 1; padding: 9px 16px; border-radius: 7px; border: none; font-family: inherit; font-size: .83rem; font-weight: 600; cursor: pointer; transition: all .18s; background: transparent; color: var(--muted); }
+    .tab.active { background: var(--accent); color: #fff; box-shadow: var(--glow); }
+    .tab:not(.active):hover { background: var(--bg3); color: var(--text); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 22px; margin-bottom: 20px;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-title { font-size: .92rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .card-title .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* ── Test area ── */
+    .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .test-card {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+      transition: border-color .2s;
+    }
+    .test-card.testing { border-color: var(--accent); animation: borderPulse 1.5s infinite; }
+    .test-card.success { border-color: var(--green); }
+    .test-card.error   { border-color: var(--red); }
+    @keyframes borderPulse { 0%,100%{border-color:var(--accent)} 50%{border-color:rgba(124,111,255,.3)} }
+    .test-name { font-size: .85rem; font-weight: 700; margin-bottom: 4px; }
+    .test-model { font-size: .72rem; color: var(--accent2); font-family: monospace; margin-bottom: 10px; }
+    .test-status {
+      font-size: .78rem; padding: 6px 10px; border-radius: 6px;
+      background: var(--bg4); color: var(--muted);
+      min-height: 32px; display: flex; align-items: center; gap: 6px;
+    }
+    .test-status.ok  { background: rgba(0,230,118,.1); color: var(--green); }
+    .test-status.err { background: rgba(255,71,87,.1); color: var(--red); }
+    .test-status.running { background: rgba(124,111,255,.1); color: var(--accent); }
+    .test-response {
+      margin-top: 10px; font-size: .78rem; color: var(--muted);
+      background: var(--bg4); border-radius: 6px; padding: 8px 10px;
+      max-height: 100px; overflow-y: auto; line-height: 1.5;
+      border: 1px solid var(--border); white-space: pre-wrap; display: none;
+    }
+    .test-meta { font-size: .7rem; color: var(--muted); margin-top: 6px; }
+
+    /* ── Form ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group.full { grid-column: 1/-1; }
+    label { font-size: .78rem; color: var(--muted); font-weight: 500; }
+    input, select, textarea {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 9px 12px;
+      font-family: inherit; font-size: .88rem; transition: border-color .18s;
+      width: 100%;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+    textarea { resize: vertical; min-height: 80px; }
+
+    /* ── Agents table ── */
+    .agents-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .agents-table th {
+      text-align: left; padding: 10px 14px; font-size: .72rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+      border-bottom: 1px solid var(--border);
+    }
+    .agents-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .agents-table tr:hover td { background: rgba(124,111,255,.04); }
+    .hp-bar { width: 60px; height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
+    .hp-fill { height: 100%; border-radius: 3px; background: var(--green); transition: width .5s; }
+    .hp-fill.mid { background: var(--yellow); }
+    .hp-fill.low { background: var(--red); }
+    .alive-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .alive-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .alive-dot.off{ background: var(--red); }
+    .alive-dot.zombie{ background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+
+    /* ── KPI mini ── */
+    .kpi-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .kpi-mini {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 18px; flex: 1; min-width: 120px;
+      position: relative; overflow: hidden;
+    }
+    .kpi-mini::before {
+      content:''; position:absolute; top:0; left:0; right:0; height:2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+    .kpi-mini-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    .kpi-mini-value { font-size: 1.6rem; font-weight: 800; margin-top: 4px; }
+
+    /* ── Log ── */
+    .log-area {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; height: 200px; overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace; font-size: .76rem; line-height: 1.6;
+    }
+    .log-line { margin-bottom: 2px; }
+    .log-ok   { color: var(--green); }
+    .log-err  { color: var(--red); }
+    .log-info { color: var(--accent2); }
+    .log-warn { color: var(--yellow); }
+
+    /* ── Badge ── */
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 5px;
+      font-size: .7rem; font-weight: 700;
+    }
+    .badge-green  { background: rgba(0,230,118,.15); color: var(--green); }
+    .badge-purple { background: rgba(124,111,255,.2); color: var(--accent); }
+    .badge-orange { background: rgba(255,159,67,.15); color: var(--orange); }
+    .badge-red    { background: rgba(255,71,87,.15); color: var(--red); }
+
+    /* ── Spinner ── */
+    .spin {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.2); border-top-color: currentColor;
+      border-radius: 50%; animation: spinAnim .7s linear infinite;
+    }
+    @keyframes spinAnim { to { transform: rotate(360deg); } }
+
+    /* ── Separator ── */
+    .sep { height: 1px; background: var(--border); margin: 20px 0; }
+
+    /* ── Toast ── */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+    .toast {
+      padding: 12px 18px; border-radius: 10px; font-size: .85rem; font-weight: 600;
+      animation: toastIn .3s ease; min-width: 240px;
+      background: var(--bg2); border: 1px solid var(--border);
+    }
+    .toast.ok  { border-color: var(--green); color: var(--green); }
+    .toast.err { border-color: var(--red); color: var(--red); }
+    .toast.info{ border-color: var(--accent); color: var(--accent); }
+    @keyframes toastIn { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: none; } }
+
+    @media(max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
+      .test-grid { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div>
+      <h1>🤖 BBBia — Gerenciador de Modelos</h1>
+      <div class="logo-sub">Configure perfis de IA, teste modelos e controle agentes na ilha</div>
+    </div>
+  </div>
+  <div class="nav-actions">
+    <div class="status-pill offline" id="status-pill">
+      <div class="status-dot"></div>
+      <span id="status-text">Conectando...</span>
+    </div>
+    <nav style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:5px 10px;backdrop-filter:blur(6px)">
+      <a href="index.html"     style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
+      <a href="dashboard.html" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">📊 Dashboard</a>
+      <a href="models.html"    style="text-decoration:none;color:#a78bfa;font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;background:rgba(124,111,255,.15)">🤖 Modelos</a>
+    </nav>
+    <button class="btn btn-primary" onclick="refreshAll()">🔄 Atualizar</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar: Profile List -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Perfis Disponíveis</div>
+      <div id="profile-list">
+        <div style="color:var(--muted);font-size:.8rem;text-align:center;padding:20px">Carregando...</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Agentes na Ilha</div>
+      <div id="sidebar-agents" style="font-size:.78rem;color:var(--muted)">—</div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+
+    <!-- KPI Row -->
+    <div class="kpi-row">
+      <div class="kpi-mini">
+        <div class="kpi-mini-label">Perfis carregados</div>
+        <div class="kpi-mini-value" id="kpi-total-profiles">—</div>
+      </div>
+      <div class="kpi-mini">
+        <div class="kpi-mini-label">Agentes ativos</div>
+        <div class="kpi-mini-value" id="kpi-active-agents">—</div>
+      </div>
+      <div class="kpi-mini">
+        <div class="kpi-mini-label">Ticks</div>
+        <div class="kpi-mini-value" id="kpi-ticks">—</div>
+      </div>
+      <div class="kpi-mini">
+        <div class="kpi-mini-label">Modelos testados</div>
+        <div class="kpi-mini-value" id="kpi-tested">0 / 0</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" id="tab-test"    onclick="switchTab('test')">🧪 Testar Modelos</button>
+      <button class="tab"        id="tab-agents"  onclick="switchTab('agents')">🤖 Agentes Ativos</button>
+      <button class="tab"        id="tab-register" onclick="switchTab('register')">➕ Adicionar Agente</button>
+      <button class="tab"        id="tab-profiles" onclick="switchTab('profiles')">⚙️ Ver Perfis</button>
+    </div>
+
+    <!-- TAB: Test Models -->
+    <div class="tab-content active" id="tc-test">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="dot" style="background:var(--yellow)"></span>
+            Teste de Chamadas por Modelo
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="runAllTests()" id="btn-run-all">
+              ▶ Testar Todos
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="clearResults()">🗑 Limpar</button>
+          </div>
+        </div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:16px">
+          Envia uma mensagem simples (<code>"Oi!"</code>) para cada modelo via OmniRoute e mede latência e resposta.
+        </p>
+        <div class="test-grid" id="test-grid">
+          <div style="color:var(--muted);font-size:.85rem;padding:20px">Carregando perfis...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">📝 Log de Testes</div>
+        <div class="log-area" id="test-log">
+          <div class="log-line log-info">Aguardando testes...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Active Agents -->
+    <div class="tab-content" id="tc-agents">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--green)"></span> Agentes na Ilha (Tempo Real)</div>
+          <button class="btn btn-outline btn-sm" onclick="loadAgents()">🔄 Refresh</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="agents-table">
+            <thead>
+              <tr>
+                <th>Status</th><th>Nome</th><th>Perfil</th><th>Modelo</th>
+                <th>HP</th><th>Tokens</th><th>Decisões</th><th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="agents-tbody">
+              <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Nenhum agente carregado</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Register Agent -->
+    <div class="tab-content" id="tc-register">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--accent)"></span> Registrar Novo Agente na Ilha</div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Owner ID *</label>
+            <input id="reg-owner" type="text" placeholder="ex: meu-id-123" value="observer-1"/>
+          </div>
+          <div class="form-group">
+            <label>Nome do Agente *</label>
+            <input id="reg-name" type="text" placeholder="ex: RoboFighter"/>
+          </div>
+          <div class="form-group full">
+            <label>Persona / Personalidade *</label>
+            <textarea id="reg-persona" placeholder="ex: Estratégico e calculista. Foca em sobrevivência.">Estratégico e adaptável. Prioriza sobrevivência.</textarea>
+          </div>
+          <div class="form-group">
+            <label>Perfil de IA</label>
+            <select id="reg-profile"></select>
+          </div>
+          <div class="form-group" style="align-self:end">
+            <button class="btn btn-green" onclick="registerAgent()">
+              🚀 Enviar para a Ilha
+            </button>
+          </div>
+        </div>
+        <div id="reg-result" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">⚡ Comando cURL Equivalente</div>
+        <pre id="curl-preview" style="background:var(--bg3);border-radius:8px;padding:14px;font-size:.76rem;color:var(--accent2);overflow-x:auto;border:1px solid var(--border);white-space:pre-wrap">Preencha os campos acima para ver o cURL...</pre>
+      </div>
+    </div>
+
+    <!-- TAB: Profiles Detail -->
+    <div class="tab-content" id="tc-profiles">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--accent2)"></span> Perfis de IA Configurados</div>
+          <span style="font-size:.78rem;color:var(--muted)">Todos via OmniRoute · mesmo endpoint, modelo diferente</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="agents-table">
+            <thead>
+              <tr>
+                <th>Perfil</th><th>Provider</th><th>Modelo</th>
+                <th>Budget</th><th>Max Tokens</th><th>Cooldown</th>
+              </tr>
+            </thead>
+            <tbody id="profiles-tbody">
+              <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">Carregando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sep"></div>
+        <div style="font-size:.8rem;color:var(--muted)">
+          <strong style="color:var(--text)">Como adicionar um novo perfil:</strong>
+          Edite <code style="color:var(--accent2)">backend/runtime/profiles.py</code> e adicione uma entrada em <code>BUILTIN_PROFILES</code>.
+          Reinicie o backend — o perfil aparecerá automaticamente aqui e no <code>POST /agents/register</code>.
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── API Config ────────────────────────────────────────────────────────────────
+const API = (() => {
+  const host = window.location.hostname || 'localhost';
+  const bp = new URLSearchParams(window.location.search).get('backend_port')
+           || localStorage.getItem('bbb_backend_port');
+  if (bp) return `http://${host}:${bp}`;
+  if (window.location.protocol === 'file:') return `http://${host}:8001`;
+  const port = window.location.port || '8001';
+  return `http://${host}:${port}`;
+})();
+
+const ADMIN_TOKEN = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
+
+let _profiles = [];
+let _testResults = {};
+let _testedCount = 0;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  await refreshAll();
+  setInterval(refreshKPIs, 5000);
+  watchRegisterForm();
+});
+
+async function refreshAll() {
+  await Promise.all([checkBackend(), loadProfiles(), loadAgents()]);
+}
+
+// ── Backend Health ────────────────────────────────────────────────────────────
+async function checkBackend() {
+  try {
+    const data = await fj('/');
+    const pill = document.getElementById('status-pill');
+    const txt = document.getElementById('status-text');
+    pill.classList.remove('offline');
+    txt.textContent = `Online · Tick ${data.ticks}`;
+    document.getElementById('kpi-ticks').textContent = (data.ticks || 0).toLocaleString();
+    document.getElementById('kpi-active-agents').textContent = data.agents ?? '—';
+  } catch {
+    document.getElementById('status-pill').classList.add('offline');
+    document.getElementById('status-text').textContent = 'Backend offline';
+  }
+}
+
+async function refreshKPIs() {
+  await checkBackend();
+}
+
+// ── Profiles ──────────────────────────────────────────────────────────────────
+async function loadProfiles() {
+  try {
+    const data = await fj('/profiles');
+    _profiles = data.profiles || [];
+    renderSidebarProfiles();
+    renderTestCards();
+    renderProfilesTable();
+    renderRegisterProfileOptions();
+    document.getElementById('kpi-total-profiles').textContent = _profiles.length;
+    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
+  } catch(e) {
+    log('err', `Erro ao carregar perfis: ${e.message}`);
+  }
+}
+
+function renderRegisterProfileOptions() {
+  const select = document.getElementById('reg-profile');
+  if (!select) return;
+
+  const current = select.value || 'claude-kiro';
+  select.innerHTML = _profiles.map(p => {
+    const providerLabel = p.provider === 'gemini' ? 'Gemini API' : 'OmniRoute';
+    return `<option value="${p.profile_id}">${p.profile_id} — ${p.model} (${providerLabel})</option>`;
+  }).join('');
+
+  if (_profiles.some(p => p.profile_id === current)) {
+    select.value = current;
+  } else if (_profiles.length > 0) {
+    select.value = _profiles[0].profile_id;
+  }
+}
+
+function renderSidebarProfiles() {
+  const el = document.getElementById('profile-list');
+  el.innerHTML = _profiles.map(p => {
+    const pfx = p.model.split('/')[0];
+    const cls = pfx === 'kr' ? 'provider-kiro'
+              : pfx === 'if' ? 'provider-iflow'
+              : pfx === 'gc' ? 'provider-gc'
+              : pfx === 'groq' ? 'provider-groq'
+              : pfx === 'gemini' ? 'provider-gemini'
+              : 'provider-other';
+    const label = pfx === 'kr' ? 'Kiro'
+                : pfx === 'if' ? 'iFlow'
+                : pfx === 'gc' ? 'Gemini CLI'
+                : pfx === 'groq' ? 'Groq'
+                : pfx === 'gemini' ? 'Gemini API'
+                : pfx;
+    return `
+      <div class="profile-card" id="pc-${p.profile_id}" onclick="selectProfile('${p.profile_id}')">
+        <div class="profile-name">${p.profile_id}</div>
+        <div class="profile-model">${p.model}</div>
+        <div class="profile-meta">Budget: ${p.token_budget.toLocaleString()} · CD: ${p.cooldown_ticks}t</div>
+        <span class="provider-badge ${cls}">${label}</span>
+      </div>`;
+  }).join('');
+}
+
+function selectProfile(id) {
+  document.querySelectorAll('.profile-card').forEach(c => c.classList.remove('active'));
+  const el = document.getElementById(`pc-${id}`);
+  if (el) el.classList.add('active');
+  // Switch to test tab and highlight
+  switchTab('test');
+  setTimeout(() => {
+    const card = document.getElementById(`tc-${id}`);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 100);
+}
+
+function renderProfilesTable() {
+  const tb = document.getElementById('profiles-tbody');
+  tb.innerHTML = _profiles.map(p => `
+    <tr>
+      <td><strong>${p.profile_id}</strong></td>
+      <td><span class="badge badge-purple">${p.provider}</span></td>
+      <td style="font-family:monospace;font-size:.78rem;color:var(--accent2)">${p.model}</td>
+      <td>${p.token_budget.toLocaleString()}</td>
+      <td>${p.max_tokens}</td>
+      <td>${p.cooldown_ticks} ticks</td>
+    </tr>`).join('');
+}
+
+// ── Test Cards ────────────────────────────────────────────────────────────────
+function renderTestCards() {
+  const grid = document.getElementById('test-grid');
+  grid.innerHTML = _profiles.map(p => `
+    <div class="test-card" id="tc-${p.profile_id}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div class="test-name">${p.profile_id}</div>
+          <div class="test-model">${p.model}</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="testModel('${p.profile_id}')">▶ Testar</button>
+      </div>
+      <div class="test-status" id="ts-${p.profile_id}">⏳ Aguardando...</div>
+      <div class="test-response" id="tr-${p.profile_id}"></div>
+      <div class="test-meta" id="tm-${p.profile_id}"></div>
+    </div>`).join('');
+}
+
+async function testModel(profileId) {
+  const profile = _profiles.find(p => p.profile_id === profileId);
+  if (!profile) return;
+
+  const card = document.getElementById(`tc-${profileId}`);
+  const status = document.getElementById(`ts-${profileId}`);
+  const resp = document.getElementById(`tr-${profileId}`);
+  const meta = document.getElementById(`tm-${profileId}`);
+
+  card.className = 'test-card testing';
+  status.className = 'test-status running';
+  status.innerHTML = '<span class="spin"></span> Enviando chamada...';
+  resp.style.display = 'none';
+  meta.textContent = '';
+
+  log('info', `[${profileId}] Iniciando teste com modelo ${profile.model}...`);
+  const t0 = Date.now();
+
+  try {
+    // Register a temp agent and immediately remove — or use a lightweight approach
+    // We test by registering an agent with this profile
+    const result = await fetch(`${API}/agents/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        owner_id: `test_${Date.now()}`,
+        owner_name: 'ModelTester',
+        agent_name: `Test_${profileId.slice(0,10)}`,
+        persona: 'Diga apenas: "Modelo OK! Pronto para a ilha." Nada mais.',
+        profile_id: profileId,
+      })
+    });
+
+    const latency = Date.now() - t0;
+
+    if (!result.ok) {
+      const err = await result.json().catch(() => ({ detail: result.statusText }));
+      throw new Error(err.detail || `HTTP ${result.status}`);
+    }
+
+    const data = await result.json();
+    const agentId = data.agent_id;
+
+    card.className = 'test-card success';
+    status.className = 'test-status ok';
+    status.textContent = `✅ Agente registrado com sucesso!`;
+    resp.textContent = `Agent ID: ${agentId}\nModelo: ${data.profile}\nLatência API: ${latency}ms`;
+    resp.style.display = 'block';
+    meta.textContent = `Latência: ${latency}ms · Perfil: ${data.profile}`;
+
+    _testResults[profileId] = { ok: true, latency };
+    _testedCount = Object.keys(_testResults).length;
+    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
+
+    log('ok', `[${profileId}] ✅ OK em ${latency}ms — agente: ${agentId}`);
+    toast('ok', `${profileId} respondeu em ${latency}ms!`);
+
+    // Remove test agent after 3s to not pollute the island
+    setTimeout(async () => {
+      try {
+        await fetch(`${API}/agent/${agentId}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Token': ADMIN_TOKEN }
+        });
+        log('info', `[${profileId}] Agente de teste ${agentId} removido.`);
+      } catch {}
+    }, 3000);
+
+  } catch(e) {
+    const latency = Date.now() - t0;
+    card.className = 'test-card error';
+    status.className = 'test-status err';
+    status.textContent = `❌ Erro: ${e.message}`;
+    resp.textContent = e.message;
+    resp.style.display = 'block';
+    meta.textContent = `Falhou em ${latency}ms`;
+
+    _testResults[profileId] = { ok: false, latency, error: e.message };
+    _testedCount = Object.keys(_testResults).length;
+    document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
+
+    log('err', `[${profileId}] ❌ ERRO: ${e.message}`);
+    toast('err', `${profileId} falhou: ${e.message}`);
+  }
+}
+
+async function runAllTests() {
+  const btn = document.getElementById('btn-run-all');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Testando...';
+  _testResults = {};
+  _testedCount = 0;
+  log('info', '=== Iniciando teste de todos os modelos ===');
+
+  for (const p of _profiles) {
+    await testModel(p.profile_id);
+    await sleep(800); // Evitar sobrecarga
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '▶ Testar Todos';
+
+  const passed = Object.values(_testResults).filter(r => r.ok).length;
+  const total = _profiles.length;
+  log(passed === total ? 'ok' : 'warn', `=== Resultado: ${passed}/${total} modelos OK ===`);
+  toast(passed === total ? 'ok' : 'info', `Testes concluídos: ${passed}/${total} OK`);
+}
+
+function clearResults() {
+  _testResults = {};
+  _testedCount = 0;
+  renderTestCards();
+  document.getElementById('test-log').innerHTML = '<div class="log-line log-info">Log limpo.</div>';
+  document.getElementById('kpi-tested').textContent = `0 / ${_profiles.length}`;
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+async function loadAgents() {
+  try {
+    const data = await fj('/');
+    const worldData = await fj('/world/scoreboard').catch(() => ({ scoreboard: [] }));
+    const status = await fj('/').catch(() => ({}));
+
+    // Use websocket state for live agent data via REST
+    // We'll get agent list from the root state broadcast
+    const wsState = await fetchWorldState();
+    renderAgents(wsState?.agents || []);
+
+    // Sidebar summary
+    const sb = document.getElementById('sidebar-agents');
+    const agents = wsState?.agents || [];
+    sb.innerHTML = agents.map(a => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="font-weight:600">${a.name}</span>
+        <span style="font-size:.7rem;color:${a.is_alive ? 'var(--green)' : 'var(--red)'}">${a.is_alive ? (a.is_zombie ? '🧟' : '✅') : '💀'}</span>
+      </div>`).join('') || '<div style="color:var(--muted)">Nenhum agente</div>';
+
+  } catch(e) {
+    log('err', `Erro ao carregar agentes: ${e.message}`);
+  }
+}
+
+async function fetchWorldState() {
+  // Use a WebSocket connection briefly to get the world state
+  return new Promise((resolve) => {
+    try {
+      const wsHost = window.location.hostname || 'localhost';
+      const wsPort = window.location.port || '8001';
+      const ws = new WebSocket(`ws://${wsHost}:${wsPort}/ws`);
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'init' || msg.type === 'update') {
+          resolve(msg.data);
+          ws.close();
+        }
+      };
+      ws.onerror = () => resolve(null);
+      setTimeout(() => { ws.close(); resolve(null); }, 3000);
+    } catch { resolve(null); }
+  });
+}
+
+function renderAgents(agents) {
+  const tb = document.getElementById('agents-tbody');
+  if (!agents.length) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Nenhum agente na ilha</td></tr>';
+    document.getElementById('kpi-active-agents').textContent = '0';
+    return;
+  }
+  document.getElementById('kpi-active-agents').textContent = agents.filter(a => a.is_alive).length;
+
+  tb.innerHTML = agents.map(a => {
+    const hp = a.hp ?? 100;
+    const hpClass = hp > 60 ? '' : hp > 30 ? 'mid' : 'low';
+    const dotClass = !a.is_alive ? 'off' : a.is_zombie ? 'zombie' : 'on';
+    const tokPct = a.token_budget > 0 ? Math.round(a.tokens_used / a.token_budget * 100) : 0;
+    return `<tr>
+      <td><span class="alive-dot ${dotClass}"></span></td>
+      <td><strong>${a.name}</strong>${a.owner_id ? `<div style="font-size:.68rem;color:var(--muted)">${a.owner_id}</div>` : ''}</td>
+      <td><span class="badge badge-purple">${a.profile_id || '—'}</span></td>
+      <td style="font-family:monospace;font-size:.72rem;color:var(--accent2)">${getModelForProfile(a.profile_id)}</td>
+      <td>
+        <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hp}%"></div></div>
+        <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${hp}/100</div>
+      </td>
+      <td>
+        <div style="font-size:.8rem">${(a.tokens_used||0).toLocaleString()}</div>
+        <div style="font-size:.68rem;color:var(--muted)">${tokPct}% budget</div>
+      </td>
+      <td>${a.benchmark?.decisions_made ?? 0}</td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="removeAgent('${a.id}', '${a.name}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function getModelForProfile(profileId) {
+  const p = _profiles.find(x => x.profile_id === profileId);
+  return p ? p.model.split('/').pop() : '?';
+}
+
+async function removeAgent(agentId, name) {
+  if (!confirm(`Remover ${name} da ilha?`)) return;
+  try {
+    const r = await fetch(`${API}/agent/${agentId}`, {
+      method: 'DELETE',
+      headers: { 'X-Admin-Token': ADMIN_TOKEN }
+    });
+    if (r.ok) {
+      toast('ok', `${name} removido!`);
+      log('ok', `Agente ${name} removido.`);
+      setTimeout(loadAgents, 1000);
+    } else {
+      const e = await r.json();
+      toast('err', e.detail || 'Erro ao remover');
+    }
+  } catch(e) {
+    toast('err', e.message);
+  }
+}
+
+// ── Register Agent ────────────────────────────────────────────────────────────
+async function registerAgent() {
+  const owner   = document.getElementById('reg-owner').value.trim();
+  const name    = document.getElementById('reg-name').value.trim();
+  const persona = document.getElementById('reg-persona').value.trim();
+  const profile = document.getElementById('reg-profile').value;
+
+  if (!owner || !name || !persona) {
+    toast('err', 'Preencha todos os campos obrigatórios!');
+    return;
+  }
+
+  const res = document.getElementById('reg-result');
+  res.innerHTML = '<div style="color:var(--muted);font-size:.85rem"><span class="spin"></span> Registrando...</div>';
+
+  try {
+    const r = await fetch(`${API}/agents/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner_id: owner, owner_name: owner, agent_name: name, persona, profile_id: profile })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+
+    res.innerHTML = `
+      <div style="background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.25);border-radius:10px;padding:14px">
+        <div style="color:var(--green);font-weight:700;margin-bottom:6px">✅ Agente registrado!</div>
+        <div style="font-size:.82rem;color:var(--muted)">
+          ID: <code style="color:var(--accent2)">${data.agent_id}</code><br>
+          Modelo: <code style="color:var(--accent2)">${data.model}</code><br>
+          Perfil: <span class="badge badge-purple">${data.profile}</span>
+        </div>
+      </div>`;
+    toast('ok', `${name} entrou na ilha!`);
+    log('ok', `Agente registrado: ${name} [${data.profile}] → ${data.agent_id}`);
+    setTimeout(loadAgents, 1500);
+  } catch(e) {
+    res.innerHTML = `<div style="color:var(--red);font-size:.85rem">❌ ${e.message}</div>`;
+    toast('err', e.message);
+    log('err', `Erro ao registrar: ${e.message}`);
+  }
+}
+
+function watchRegisterForm() {
+  ['reg-owner','reg-name','reg-persona','reg-profile'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateCurlPreview);
+  });
+  updateCurlPreview();
+}
+
+function updateCurlPreview() {
+  const owner   = document.getElementById('reg-owner').value || 'meu-id';
+  const name    = document.getElementById('reg-name').value || 'MeuBot';
+  const persona = document.getElementById('reg-persona').value || 'Estratégico';
+  const profile = document.getElementById('reg-profile').value;
+  document.getElementById('curl-preview').textContent =
+`curl -X POST ${API}/agents/register \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "owner_id": "${owner}",
+    "agent_name": "${name}",
+    "persona": "${persona.slice(0,50)}",
+    "profile_id": "${profile}"
+  }'`;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  document.getElementById(`tc-${name}`).classList.add('active');
+  if (name === 'agents') loadAgents();
+  if (name === 'profiles') renderProfilesTable();
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function log(type, msg) {
+  const area = document.getElementById('test-log');
+  const ts = new Date().toLocaleTimeString('pt-BR');
+  const line = document.createElement('div');
+  line.className = `log-line log-${type}`;
+  line.textContent = `[${ts}] ${msg}`;
+  area.appendChild(line);
+  area.scrollTop = area.scrollHeight;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(type, msg) {
+  const container = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+async function fj(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json();
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+</script>
+</body>
+</html>

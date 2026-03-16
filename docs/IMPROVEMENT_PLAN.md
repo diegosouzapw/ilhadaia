@@ -1,151 +1,110 @@
-# 🗒️ Plano de Implementação — BBBia Versão Turbinada
+# Plano de Implementacao
 
-> Atualizado: Março 2026 | Versão: v0.5 | Status: **T17 no backlog, T01–T16 + T18–T24 implementadas**
+Este documento resume o que ja foi consolidado no projeto e o que foi ajustado especificamente nesta branch para fechar o ciclo de operacao, documentacao e setup local.
 
----
+## Base consolidada antes desta branch
 
-## Resumo do Roadmap
+Ja existiam no repositorio:
 
-| Versão | Foco | Tasks | Status |
-|--------|------|-------|--------|
-| v0.2 — Engine Confiável | Segurança, budget, storage | T01–T06 | ✅ 100% |
-| v0.3 — Multi-Provider Benchmark | Adapters, perfis, thinker, memória, schema, testes | T07–T12 | ✅ 100% |
-| v0.4 — Plataforma de Competição | Replay, registro, torneios, frontend | T13–T16 | ✅ 100% |
-| v0.5 — Escala & Intelligence | Rate limit, export, tournament runner, relevância, memória, dashboard, webhooks | T18–T24 | ✅ 100% |
-| Backlog | Redis pub/sub multi-worker | T17 | ⏳ Backlog |
+- simulacao em tempo real com `World`
+- persistencia de sessoes, scoreboard, memoria e replay
+- adapters Gemini + OpenAI-compatible
+- `Thinker` para orquestracao das decisoes
+- dashboard analitico
+- endpoints de torneio, exportacao, memoria e webhook
 
----
+## Ajustes consolidados nesta branch
 
-## v0.2 — Engine Confiável ✅
+### 1. Frontend servido pelo backend
 
-### T01 — Admin Token
-**Arquivo:** `backend/main.py`  
-Endpoint `DELETE /agent/{id}` protegido com `X-Admin-Token` via `Depends(verify_admin_token)`. Retorna 401 sem token.
+Mudanca:
 
-### T02 — Budget & Cooldown
-**Arquivo:** `backend/agent.py`  
-Adicionados: `token_budget`, `tokens_used`, `cooldown_ticks`, `last_thought_tick`, `benchmark`, `can_think()`, `update_benchmark()`.
+- `backend/main.py` monta `StaticFiles` em `/frontend`
 
-### T03 — Decision Log
-**Arquivo:** `backend/storage/decision_log.py`  
-Log NDJSON por sessão. Cada linha: `{session_id, tick, agent_id, action, thought, tokens_used, cost_usd, latency_ms}`.
+Impacto:
 
-### T04 — SQLite Scoreboard
-**Arquivo:** `backend/storage/session_store.py`  
-SQLite WAL com tabelas: `sessions`, `agent_scores`, `world_settings_history`. Métodos: `create_session`, `end_session`, `upsert_agent_score`, `get_scoreboard`.
+- `index.html`, `dashboard.html` e `models.html` agora fazem parte do fluxo oficial de uso
+- a documentacao deixa de orientar `file://`
 
-### T05 — Lifespan Migration
-**Arquivo:** `backend/main.py`  
-`@app.on_event` substituído por `@asynccontextmanager async def lifespan(app)`. Inclui startup e shutdown limpos.
+### 2. Catalogo de perfis free-first
 
-### T06 — Docker
-**Arquivos:** `backend/Dockerfile`, `docker-compose.yml`, `.env.example`  
-Serviços: `backend` (FastAPI) + `nginx` (proxy reverso). Build multi-stage.
+Mudanca:
 
----
+- `backend/runtime/profiles.py` foi atualizado para um conjunto focado em OmniRoute + perfis gratuitos
+- fallback tecnico passou para `claude-kiro`
 
-## v0.3 — Multi-Provider Benchmark ✅
+Perfis atuais:
 
-### T07 — AI Adapters
-**Arquivos:** `backend/runtime/adapters/base.py`, `gemini.py`, `openai_compatible.py`  
-`AIAdapter` (abstract), `AIResponse` (dataclass), `GeminiAdapter` (google-genai SDK), `OpenAICompatibleAdapter` (openai SDK → OmniRouter).
+- `claude-kiro`
+- `claude-haiku`
+- `kimi-thinking`
+- `qwen-coder`
+- `kimi-groq`
+- `gemini-flash`
+- `llama-groq`
+- `gemini-native`
 
-### T08 — Agent Profiles
-**Arquivo:** `backend/runtime/profiles.py`  
-6 perfis: `gemini-native`, `cheap-fast`, `balanced`, `smart`, `oss-fast`, `creative`. Configurados com `provider`, `model`, `token_budget`, `cooldown_ticks`, `max_tokens`.
+### 3. Defaults operacionais alinhados
 
-### T09 — Thinker
-**Arquivo:** `backend/runtime/thinker.py`  
-Orquestrador central: `can_think()` → montar contexto → chamar adapter → validar com ActionDecision → atualizar memória → logar decisão.
+Mudanca:
 
-### T10 — Memória 4 Camadas
-**Arquivo:** `backend/runtime/memory.py`  
-`AgentMemory` com `ShortTermEntry` (deque max 10), `EpisodicEntry` (max 50), `RelationalEntry` (opiniões -1..+1), benchmark herdado do Agent.
+- `POST /agents/register` agora defaulta para `claude-kiro`
+- o estado serializado do mundo usa `claude-kiro` como fallback de `profile_id`
+- os NPCs iniciais usam uma rotacao gratuita predefinida
 
-### T11 — Structured Output
-**Arquivo:** `backend/runtime/schemas.py`  
-`ActionDecision` Pydantic: validação de `action` (enum), `intent` (max 100 chars), alias `speech→speak`, `to_world_action()`, `from_dict()` seguro, `get_json_schema_prompt()`.
+### 4. Console de modelos
 
-### T12 — Testes Unitários
-**Arquivo:** `backend/tests/test_engine.py`  
-31 testes pytest: `TestActionDecision`, `TestAgentMemory`, `TestProfiles`, `TestAIResponse`, `TestDecisionLog`, `TestSessionStore`. **31/31 passing ✅**
+Mudanca:
 
----
+- `frontend/models.html` passou a ser uma interface oficial do sistema
 
-## v0.4 — Plataforma de Competição ✅
+Capacidades:
 
-### T13 — Replay System
-**Arquivo:** `backend/storage/replay_store.py`  
-Snapshots NDJSON a cada 5 ticks por sessão. Métodos: `start_session`, `save_snapshot`, `load_session`, `get_frame`.
+- listar perfis
+- testar chamadas por modelo
+- registrar agentes
+- inspecionar agentes ativos
 
-### T14 — Agent Registration
-**Endpoint:** `POST /agents/register`  
-Registro de agentes externos com `owner_id`, `agent_name`, `persona`, `profile_id`. Agente ativo na ilha automaticamente.
+Ajuste feito nesta continuacao:
 
-### T15 — Tournament API
-**Endpoints:** `POST /tournaments`, `POST /tournaments/{id}/join`, `POST /tournaments/{id}/start`, `GET /tournaments/{id}/leaderboard`  
-Torneios em memória com registro de agentes e leaderboard ao vivo.
+- o select de cadastro agora sincroniza com `GET /profiles`, evitando divergencia entre backend e UI
 
-### T16 — Frontend Turbinado
-**Arquivos:** `frontend/index.html`, `frontend/benchmark.js`, `frontend/style.css`  
-HUD Benchmark (🏆), Painel de Replay (▶), Timeline de Eventos (📜), Modal de Agente Detalhado.
+### 5. Operacao limpa do repositorio
 
----
+Mudanca:
 
-## v0.5 — Escala & Intelligence ✅
+- `.gitignore` cobre banco, WAL, replays, logs e JSONs de runtime
+- `backend/data/ilhadaia.db`, `backend/data/ilhadaia.db-shm`, `backend/data/ilhadaia.db-wal` e `backend/world_settings.json` sairam do versionamento
+- o workspace foi limpo para o backend voltar a gerar estado do zero
 
-### T18 — Rate Limiting
-**Arquivo:** `backend/main.py` (slowapi)  
-Rate limit por IP em endpoints públicos. `/agents/register`: 10/min, `/tournaments`: 5/min, `/webhooks/register`: 20/hora.
+### 6. Documentacao reconciliada
 
-### T19 — Exportação CSV/JSON
-**Endpoints:**
-- `GET /sessions/{id}/export?format=csv|json`
-- `GET /world/scoreboard/export?format=csv|json`
-- `GET /sessions/{id}/decisions/export?format=csv|json`
+Arquivos atualizados:
 
-`StreamingResponse` com `Content-Disposition` para download direto.
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `docs/DEVELOPMENT_GUIDE.md`
+- `docs/BACKLOG.md`
+- `docs/CURRENT_STATE_AUDIT.md`
+- `docs/TARGET_ARCHITECTURE.md`
 
-### T20 — Tournament Runner
-**Arquivo:** `backend/runtime/tournament_runner.py`  
-`TournamentRunner` com loop assíncrono de monitoramento. Finalização automática por `duration_ticks`. Leaderboard ao vivo e final. `GET /tournaments/{id}/status` com `progress_pct` e `ticks_remaining`.
+## Validacao executada
 
-### T21 — Relevância Episódica
-**Arquivo:** `backend/runtime/relevance.py`  
-`EpisodicRelevanceEngine`: TF-IDF simplificado + pesos por tipo de evento (`death=3.0`, `attack=2.5`, `move=0.5`) + decaimento temporal exponencial. Sem ChromaDB.
+Comando rodado nesta atualizacao:
 
-### T22 — Memória Persistente
-**Arquivo:** `backend/storage/memory_store.py`  
-`MemoryStore` salva/restaura `AgentMemory` (4 camadas) no SQLite entre sessões para agentes com `owner_id`. Endpoints: `GET /memories`, `POST /memories/save/{id}`.
+```bash
+pytest backend/tests/test_engine.py -q
+```
 
-### T23 — Dashboard de Análise
-**Arquivo:** `frontend/dashboard.html`  
-Dashboard completo: KPIs ao vivo, Chart.js (tokens/scores), comparação de modelos por score médio, scoreboard global, histórico de sessões, seletor de sessão + export CSV.
+Resultado:
 
-### T24 — Notificações Push
-**Arquivo:** `backend/storage/webhook_manager.py`  
-`WebhookManager` com registro de URLs por owner, filtragem por tipo de evento, disparo assíncrono com `httpx` e assinatura HMAC-SHA256. Endpoints: register, list, delete, test.
+- `33 passed`
 
----
+## Proximo passo tecnico recomendavel
 
-## Backlog
+Se houver nova rodada de trabalho estrutural, o melhor ROI agora e:
 
-### T17 — Redis WebSocket (pub/sub) — ⏳ Backlog
-**Arquivo planejado:** `backend/messaging/redis_pubsub.py`  
-Substituir broadcast em memória por Redis Pub/Sub para suportar múltiplos workers uvicorn. Requer instalação e configuração de Redis como serviço externo.
-
-**Dependências:** `redis`, `aioredis` | **Estimativa:** 2–3h | **Impacto:** Alto (necessário para escala horizontal)
-
-Ver [`BACKLOG.md`](./BACKLOG.md) para detalhes completos.
-
----
-
-## Critérios de Aceite Globais
-
-- ✅ Backend sem erro em startup
-- ✅ 31/31 testes unitários passando
-- ✅ Frontend conecta e exibe estado em tempo real
-- ✅ Dashboard carrega KPIs e scoreboard
-- ✅ Webhook registrado e listado com sucesso
-- ✅ Export CSV de scoreboard com 175+ entradas
-- ✅ Torneio com status detalhado e leaderboard
+1. quebrar `backend/main.py` em modulos de rota e servico
+2. desacoplar broadcast WebSocket do processo unico
+3. resolver paths de storage independentemente do diretorio de boot

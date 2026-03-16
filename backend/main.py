@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -85,7 +86,7 @@ class AgentRegistration(BaseModel):
     owner_name: str = ""
     agent_name: str
     persona: str = "Estratégico e adaptável"
-    profile_id: str = "gemini-native"
+    profile_id: str = "claude-kiro"
 
 class TournamentConfig(BaseModel):
     name: str
@@ -169,6 +170,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Frontend estático ─────────────────────────────────────────────────────────
+_frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+app.mount("/frontend", StaticFiles(directory=_frontend_dir), name="frontend")
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 class ConnectionManager:
@@ -405,7 +410,7 @@ async def get_agent_state(agent_id: str):
         "position": {"x": agent.x, "y": agent.y},
         "tokens_used": getattr(agent, "tokens_used", 0),
         "token_budget": getattr(agent, "token_budget", 10000),
-        "profile_id": getattr(agent, "profile_id", "gemini-native"),
+        "profile_id": getattr(agent, "profile_id", "claude-kiro"),
         "benchmark": getattr(agent, "benchmark", {}),
         "recent_memory": agent.memory[-5:] if hasattr(agent, "memory") else [],
     }
