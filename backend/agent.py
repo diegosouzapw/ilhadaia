@@ -1,20 +1,32 @@
 import os
 import json
 import logging
-import httpx
 from uuid import uuid4
 from dotenv import load_dotenv
-from google import genai
-from pydantic import BaseModel, Field
+from openai import AsyncOpenAI
+from runtime.profiles import OMNIROUTER_URL, OMNIROUTER_API_KEY, get_profile
 
 # Carrega as variáveis do .env file
 load_dotenv(override=True)
 
 logger = logging.getLogger("BBB_IA.Agent")
 
-# Determine API key
-def get_current_key():
-    return os.getenv("GEMINI_API_KEY")
+def get_current_api_key():
+    return (
+        os.getenv("OMNIROUTER_API_KEY")
+        or os.getenv("OMNIROUTE_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or OMNIROUTER_API_KEY
+    )
+
+
+def get_current_base_url():
+    return (
+        os.getenv("OMNIROUTER_URL")
+        or os.getenv("OMNIROUTE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or OMNIROUTER_URL
+    )
 
 class Agent:
     def __init__(self, name: str, personality: str, start_x: int, start_y: int, is_remote: bool = False, agent_id: str = None):
@@ -46,8 +58,28 @@ class Agent:
         self.death_tick = None  # Tick when this agent died
 
         
-        # Simple memory (could be a vector DB later)
-        self.memory = []
+        # ── Budget & Cooldown (T02) ─────────────────────────────────────────
+        self.token_budget: int = 10_000     # limite de tokens por sessão
+        self.tokens_used: int = 0           # tokens consumidos na sessão
+        self.cooldown_ticks: int = 3        # ticks mínimos entre pensamentos
+        self.last_thought_tick: int = -99   # último tick que chamou a IA
+        self.profile_id: str = "claude-kiro"  # perfil de IA usado
+        self.owner_id: str = ""             # owner externo (se houver)
+
+        # ── Benchmark Tracking ───────────────────────────────────────────────
+        self.benchmark: dict = {
+            "ticks_survived": 0,
+            "decisions_made": 0,
+            "invalid_actions": 0,
+            "score": 0.0,
+            "cost_usd": 0.0,
+        }
+
+        # ── Memória 4 Camadas (T10) ──────────────────────────────────────────
+        from runtime.memory import AgentMemory
+        self.agent_memory = AgentMemory()
+        # Compatibilidade retroativa: self.memory ainda aponta para short_term entries
+        self.memory: list = self.agent_memory.short_term  # type: ignore
         
         # Determine home coordinates
         home_coords = "(2, 2)" # Default fallback
@@ -56,7 +88,7 @@ class Agent:
         elif self.name == "Zeca": home_coords = "(17, 2)"
         else: home_coords = "(2, 17)" # Elly/Carla/etc
 
-        # Setup Gemini Model with structured output instruction
+        # Setup default model instruction for the OpenAI-compatible fallback path
         system_instruction = f"""
         Você é um personagem em uma simulação de sobrevivência 3D.
         Seu nome é {self.name}.
@@ -94,42 +126,57 @@ class Agent:
         }}
         """
         
-        # Setup Gemini Client
-        current_key = get_current_key()
+        # Legacy fallback client. O runtime principal usa Thinker + profiles.
+        current_key = get_current_api_key()
+        current_base_url = get_current_base_url()
         try:
-             self.client = genai.Client(api_key=current_key) if current_key else None
-             #self.model_name = 'gemini-3.1-flash-lite-preview'
-             self.model_name = 'gemini-2.5-flash-lite'
-             self.system_instruction = system_instruction
+            self.client = AsyncOpenAI(base_url=current_base_url, api_key=current_key)
+            self.provider = "omnirouter"
+            self.model_name = get_profile(self.profile_id).model
+            self.system_instruction = system_instruction
         except Exception as e:
             logger.error(f"Failed to init model client: {e}")
             self.client = None
 
         
+    def can_think(self, current_tick: int) -> bool:
+        """Verifica se o agente pode chamar a IA agora (respeita cooldown e budget)."""
+        if current_tick - self.last_thought_tick < self.cooldown_ticks:
+            return False  # cooldown não passou
+        if self.tokens_used >= self.token_budget:
+            return False  # budget esgotado
+        return True
+
+    def update_benchmark(self, ticks_alive: int = 0, score_delta: float = 0.0,
+                         tokens_delta: int = 0, invalid: bool = False) -> None:
+        """Atualiza métricas de benchmark do agente."""
+        self.benchmark["ticks_survived"] = max(self.benchmark["ticks_survived"], ticks_alive)
+        self.benchmark["score"] += score_delta
+        self.tokens_used += tokens_delta
+        self.benchmark["decisions_made"] += 1
+        if invalid:
+            self.benchmark["invalid_actions"] += 1
+
     async def act(self, context: dict):
         """Called every tick by the World to get the agent's next action."""
         if not self.is_alive or self.is_remote:
             return None
 
-        # Determine which provider to use from context
-        ai_provider = context.get("ai_provider", "gemini")
-        omniroute_url = context.get("omniroute_url", "http://localhost:20128/v1/chat/completions")
-
-        current_key = os.getenv("GEMINI_API_KEY") if ai_provider == "gemini" else os.getenv("OMNIROUTE_API_KEY")
-
-        if ai_provider == "gemini" and (not self.client or not current_key):
-             import random
-             action = {
-                 "agent_id": self.id,
-                 "name": self.name,
-                 "thought": "I don't have a Gemini API key, wandering randomly...",
-                 "action": "move",
-                 "dx": random.choice([-1, 0, 1]),
-                 "dy": random.choice([-1, 0, 1])
-             }
-             return action
+        current_key = get_current_api_key()
+        if not self.client or not current_key:
+            # Fallback random movement if API client is unavailable
+            import random
+            action = {
+                "thought": "No OpenAI-compatible brain configured, wandering randomly...",
+                "action": "move",
+                "dx": random.choice([-1, 0, 1]),
+                "dy": random.choice([-1, 0, 1])
+            }
+            logger.debug(f"{self.name} generated fallback action: {action}")
+            return action
 
         # Build prompt based on context
+        self.model_name = get_profile(getattr(self, "profile_id", "claude-kiro")).model
         prompt = f"""
         TICK ATUAL: {context['time']}
         PERÍODO: {"🌙 NOITE" if context.get('is_night') else "☀️ DIA"}
@@ -164,28 +211,22 @@ class Agent:
         """
         
         try:
-            if ai_provider == "gemini":
-                # Make the Gemini API call
-                response = self.client.models.generate_content(
-                    model=context.get("ai_model", "gemini-2.0-flash"),
-                    contents=prompt,
-                    config=genai.types.GenerateContentConfig(
-                        system_instruction=self.system_instruction,
-                        response_mime_type="application/json",
-                    ),
-                )
-                text_response = response.text.strip()
-            else:
-                # Make OMNIROUTE API call
-                text_response = await self._call_omniroute(prompt, omniroute_url, current_key, context.get("ai_model", "gpt-4o"))
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": self.system_instruction},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=300,
+                temperature=0.7,
+            )
+            text_response = (response.choices[0].message.content or "").strip()
             
             # Clean up potential markdown formatting from the response
-            text_response = text_response.strip()
             if text_response.startswith("```json"):
                 text_response = text_response[7:]
             if text_response.endswith("```"):
                 text_response = text_response[:-3]
-            text_response = text_response.strip()
                 
             action_data = json.loads(text_response)
             
@@ -221,7 +262,10 @@ class Agent:
             return final_action
             
         except Exception as e:
-            logger.error(f"Error generating action for {self.name}: {e}")
+            logger.error(
+                f"Error generating action for {self.name}: {e}\n"
+                f"Response was: {text_response if 'text_response' in locals() else 'None'}"
+            )
             return {
                 "agent_id": self.id, 
                 "name": self.name, 
@@ -229,24 +273,3 @@ class Agent:
                 "thought": f"Erro de processamento: {str(e)}", 
                 "speak": "Minha cabeça está um pouco confusa agora... (Erro de IA)"
             }
-
-    async def _call_omniroute(self, prompt, url, api_key, model_name):
-        """Standard OpenAI-style call for OMNIROUTE."""
-        headers = {
-            "Authorization": f"Bearer {api_key if api_key else 'no-key'}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": self.system_instruction},
-                {"role": "user", "content": prompt}
-            ],
-            "response_format": {"type": "json_object"}
-        }
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
