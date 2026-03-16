@@ -1,28 +1,85 @@
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
+import random
+import time
+import uuid
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, List, Dict, Any
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 import httpx
 from pydantic import BaseModel, Field
+from typing import Optional
+
+# T18: Rate Limiting
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    limiter = Limiter(key_func=get_remote_address)
+    RATE_LIMIT_ENABLED = True
+except ImportError:
+    limiter = None
+    _rate_limit_exceeded_handler = None
+    RateLimitExceeded = None
+    RATE_LIMIT_ENABLED = False
+
+# ── Configuração ──────────────────────────────────────────────────────────────
+load_dotenv()
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123")
+AUTHORIZED_IDS = [id.strip() for id in os.getenv("AUTHORIZED_IDS", "777").split(",") if id.strip()]
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 from world import World
 from agent import Agent
+from storage.decision_log import DecisionLog
+from storage.session_store import SessionStore
+from storage.replay_store import ReplayStore
+from storage.memory_store import MemoryStore           # T22
+from storage.webhook_manager import WebhookManager     # T24
+from runtime.thinker import Thinker
+from runtime.profiles import (
+    list_profiles,
+    get_profile,
+    BUILTIN_PROFILES,
+    OMNIROUTER_URL,
+    OMNIROUTER_API_KEY,
+)
+from runtime.tournament_runner import TournamentRunner  # T20
 
-# Authorization
-load_dotenv()
-AUTHORIZED_IDS = [id.strip() for id in os.getenv("AUTHORIZED_IDS", "777").split(",") if id.strip()]
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev_token_123")
-OMNIROUTE_API_KEY = os.getenv("OMNIROUTE_API_KEY")
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("BBB_IA")
 
+# ── Módulos de storage e runtime ──────────────────────────────────────────────
+decision_log = DecisionLog(log_dir="logs")
+session_store = SessionStore(db_path="data/ilhadaia.db")
+replay_store = ReplayStore(replay_dir="data/replays", snapshot_interval=5)
+memory_store = MemoryStore(db_path="data/ilhadaia.db")  # T22
+webhook_manager = WebhookManager(db_path="data/ilhadaia.db")  # T24
+thinker: Optional[Thinker] = None
+
+# ── Estado global ─────────────────────────────────────────────────────────────
+world = World()
+world.reset_agents(Agent)
+
+_current_session_id: Optional[str] = None
+
+# Torneios em memória + runner
+TOURNAMENTS: dict[str, dict] = {}
+tournament_runner: Optional[TournamentRunner] = None
+_notified_finished_tournaments: set[str] = set()
+
+# ── Models ────────────────────────────────────────────────────────────────────
 class JoinRequest(BaseModel):
-    agent_id: str = Field(..., example="777")
-    name: str = Field(..., example="Visitante")
-    personality: str = Field(..., example="Curioso e amigável")
+    agent_id: str = Field(..., json_schema_extra={"example": "777"})
+    name: str = Field(..., json_schema_extra={"example": "Visitante"})
+    personality: str = Field(..., json_schema_extra={"example": "Curioso e amigável"})
 
 class ActionRequest(BaseModel):
     thought: str = ""
@@ -31,300 +88,588 @@ class ActionRequest(BaseModel):
     target_name: str = ""
     params: dict = {}
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("BBB_IA")
+class AgentRegistration(BaseModel):
+    owner_id: str
+    owner_name: str = ""
+    agent_name: str
+    persona: str = "Estratégico e adaptável"
+    profile_id: str = "claude-kiro"
 
-# Configuration (Already loaded at the top)
+class TournamentConfig(BaseModel):
+    name: str
+    max_agents: int = 8
+    duration_ticks: int = 500
+    allowed_profiles: list[str] = []
+    reset_on_finish: bool = True
 
-app = FastAPI(title="BBB de IA - Backend Engine")
-
-# Security dependency
-async def verify_admin_token(x_admin_token: str = Header(None)):
-    if x_admin_token != ADMIN_TOKEN:
-        logger.warning(f"Unauthorized access attempt with token: {x_admin_token}")
-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing Admin Token")
-    return x_admin_token
-
-# Allow CORS for dynamic origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Global world instance
-world = World()
-
-# Setup Initial Agents (respecting saved settings)
-world.reset_agents(Agent)
-
-# Tracking active websocket connections for the "God mode" frontend observers
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"Client connected. Total: {len(self.active_connections)}")
-        # Send initial world state upon connection
-        await websocket.send_text(json.dumps({"type": "init", "data": world.get_state()}))
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logger.info("Client disconnected.")
-
-    async def broadcast(self, message: dict):
-        if not self.active_connections:
-            return
-        msg_str = json.dumps(message)
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(msg_str)
-            except Exception as e:
-                logger.error(f"Error broadcasting message: {e}")
-
-manager = ConnectionManager()
-
-@app.on_event("startup")
-async def startup_event():
-    # Start the world simulation loop in the background
-    asyncio.create_task(world_loop())
-    logger.info("World simulation loop started.")
-
-async def world_loop():
-    while True:
-        try:
-            # 1. Update the world state (tick)
-            events = await world.tick()
-            
-            # Handle Auto-Reset Signal
-            if events == "AUTO_RESET":
-                world.reset_agents(Agent)
-                events = [] # Clear so it sends as a normal update for the reset state
-                await manager.broadcast({"type": "reset", "data": world.get_state()})
-
-            # 2. Broadcast the new state to all connected frontends
-            if events or world.ticks % 1 == 0: # send state periodically or on events
-                await manager.broadcast({"type": "update", "data": world.get_state(), "events": events if isinstance(events, list) else []})
-                
-        except Exception as e:
-            logger.error(f"Error in world loop: {e}")
-            
-            # Tick delay (1 second per tick now for smooth movement)
-        await asyncio.sleep(1)
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            # We don't expect much input from the observer yet, but we keep the connection open
-            data = await websocket.receive_text()
-            logger.debug(f"Received message from client: {data}")
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-@app.get("/")
-def read_root():
-    return {"status": "World engine is running", "ticks": world.ticks}
-
-@app.post("/reset", dependencies=[Depends(verify_admin_token)])
-async def reset_game(player_count: int = 4):
-    world.reset_agents(Agent, player_count=player_count)
-    await manager.broadcast({"type": "reset", "data": world.get_state()})
-    return {"status": "World reset successful", "player_count": player_count}
-
-@app.post("/settings/ai_interval", dependencies=[Depends(verify_admin_token)])
-async def set_ai_interval(interval: int):
-    world.ai_interval = max(0, interval)
-    world._save_history() # Persist change
-    logger.info(f"AI decision interval updated to: {world.ai_interval}")
-    return {"status": "Interval updated", "new_interval": world.ai_interval}
 
 class AISettingsRequest(BaseModel):
     ai_provider: str
     ai_model: str
     omniroute_url: str
 
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    # Mantem compatibilidade com valores antigos, mas o runtime agora opera
+    # apenas via endpoints OpenAI-compatible.
+    return "omnirouter"
+
+
+def _normalize_omni_base_url(url: Optional[str]) -> str:
+    value = (url or OMNIROUTER_URL).strip().rstrip("/")
+    if value.endswith("/chat/completions"):
+        value = value[: -len("/chat/completions")]
+    return value or OMNIROUTER_URL
+
+
+def _catalog_api_key() -> str:
+    return OMNIROUTER_API_KEY
+
+
+def _default_model_for_provider(provider: str) -> str:
+    return get_profile("claude-kiro").model
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+async def verify_admin_token(x_admin_token: str = Header(None)):
+    if x_admin_token != ADMIN_TOKEN:
+        logger.warning(f"Unauthorized access attempt with token: {x_admin_token}")
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing Admin Token")
+    return x_admin_token
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _current_session_id, thinker, tournament_runner
+    # === STARTUP ===
+    thinker = Thinker(decision_log=decision_log)
+
+    async def _thinker_decider(agent, context, tick):
+        if thinker is None or _current_session_id is None:
+            return await agent.act(context)
+        return await thinker.think(
+            agent=agent,
+            world_context=context,
+            current_tick=tick,
+            session_id=_current_session_id,
+        )
+
+    world.set_ai_decider(_thinker_decider)
+    _world_settings = {
+        "ai_interval": world.ai_interval,
+        "player_count": world.player_count,
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
+    _current_session_id = session_store.create_session(_world_settings)
+    world.set_session_id(_current_session_id)
+    decision_log.start_session(_current_session_id)
+    replay_store.start_session(_current_session_id)
+    task = asyncio.create_task(world_loop())
+    # T20: iniciar tournament runner
+    tournament_runner = TournamentRunner(TOURNAMENTS, world, session_store)
+    tournament_runner.start()
+    logger.info(f"🌍 World simulation started — session: {_current_session_id}")
+
+    yield
+
+    # === SHUTDOWN ===
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    replay_store.close()
+    decision_log.close()
+    tournament_runner.stop() if tournament_runner else None
+    memory_store.close()
+    webhook_manager.close()
+    session_store.close()
+    logger.info("🛑 World simulation stopped cleanly.")
+
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(title="BBB de IA - Backend Engine", lifespan=lifespan)
+
+# T18: inicialização de rate limiting (quando slowapi estiver instalado)
+if RATE_LIMIT_ENABLED and limiter and _rate_limit_exceeded_handler and RateLimitExceeded:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+def _rate_limit(limit: str):
+    """Decorator condicional de rate limit."""
+    def decorator(func):
+        if RATE_LIMIT_ENABLED and limiter:
+            return limiter.limit(limit)(func)
+        return func
+    return decorator
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS + ["null"],  # "null" = file:// origin
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Frontend estático ─────────────────────────────────────────────────────────
+_frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+app.mount("/frontend", StaticFiles(directory=_frontend_dir), name="frontend")
+
+# ── WebSocket ─────────────────────────────────────────────────────────────────
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket) -> bool:
+        await websocket.accept()
+        try:
+            await websocket.send_text(json.dumps({"type": "init", "data": world.get_state()}))
+        except WebSocketDisconnect:
+            logger.info("Client disconnected before init payload was sent.")
+            return False
+        except Exception as exc:
+            logger.info("Client connection dropped during init payload: %s", exc)
+            return False
+
+        self.active_connections.append(websocket)
+        logger.info(f"Client connected. Total: {len(self.active_connections)}")
+        return True
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"Client disconnected. Total: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        if not self.active_connections:
+            return
+        msg_str = json.dumps(message)
+        stale_connections: list[WebSocket] = []
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(msg_str)
+            except WebSocketDisconnect:
+                stale_connections.append(connection)
+            except Exception as exc:
+                stale_connections.append(connection)
+                logger.info("Dropping stale WebSocket connection during broadcast: %s", exc)
+
+        for connection in stale_connections:
+            self.disconnect(connection)
+
+manager = ConnectionManager()
+
+async def _dispatch_webhooks_from_events(events: list[dict]) -> None:
+    """Dispara webhooks para eventos críticos sem impactar o game loop."""
+    tasks = []
+    for event in events:
+        action = event.get("action")
+        if action == "die":
+            tasks.append(webhook_manager.fire_event("death", {
+                "agent_id": event.get("agent_id", ""),
+                "agent_name": event.get("name", ""),
+                "tick": world.ticks,
+                "event_msg": event.get("event_msg", ""),
+            }))
+        elif action == "zombie":
+            tasks.append(webhook_manager.fire_event("zombie", {
+                "agent_id": event.get("agent_id", ""),
+                "agent_name": event.get("name", ""),
+                "tick": world.ticks,
+                "event_msg": event.get("event_msg", ""),
+            }))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+# ── Game Loop ─────────────────────────────────────────────────────────────────
+async def world_loop():
+    while True:
+        try:
+            events = await world.tick()
+
+            if events == "AUTO_RESET":
+                world.reset_agents(Agent)
+                events = []
+                await manager.broadcast({"type": "reset", "data": world.get_state()})
+            else:
+                # Atualizar scores no SQLite a cada 10 ticks
+                if world.ticks % 10 == 0 and _current_session_id:
+                    for agent in world.agents:
+                        try:
+                            session_store.upsert_agent_score(_current_session_id, agent)
+                            if getattr(agent, "owner_id", ""):
+                                memory_store.save(agent)
+                        except Exception:
+                            pass
+                    # Snapshot de replay
+                    replay_store.maybe_snapshot(world.ticks, world.get_state())
+
+            if isinstance(events, list) and events:
+                asyncio.create_task(_dispatch_webhooks_from_events(events))
+
+            # Notifica fim de torneio uma única vez por torneio
+            for tournament_id, tournament in TOURNAMENTS.items():
+                if tournament.get("status") == "finished" and tournament_id not in _notified_finished_tournaments:
+                    _notified_finished_tournaments.add(tournament_id)
+                    asyncio.create_task(webhook_manager.fire_event("tournament_end", {
+                        "tournament_id": tournament_id,
+                        "winner": tournament.get("winner", {}),
+                        "tick": world.ticks,
+                    }))
+
+            if events or world.ticks % 1 == 0:
+                await manager.broadcast({
+                    "type": "update",
+                    "data": world.get_state(),
+                    "events": events if isinstance(events, list) else []
+                })
+        except Exception as e:
+            logger.error(f"Error in world loop: {e}")
+        await asyncio.sleep(1)
+
+# ── Endpoints básicos ─────────────────────────────────────────────────────────
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    connected = await manager.connect(websocket)
+    if not connected:
+        return
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.debug(f"Received message from client: {data}")
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(websocket)
+
+@app.get("/")
+def read_root():
+    return {
+        "status": "World engine is running",
+        "ticks": world.ticks,
+        "session_id": _current_session_id,
+        "agents": len(world.agents),
+    }
+
+@app.post("/reset", dependencies=[Depends(verify_admin_token)])
+async def reset_game(player_count: int = 4):
+    global _current_session_id
+    if _current_session_id:
+        for agent in world.agents:
+            if getattr(agent, "owner_id", ""):
+                memory_store.save(agent)
+        replay_store.force_snapshot(world.ticks, world.get_state())
+        session_store.end_session(_current_session_id, None, None)
+    _world_settings = {
+        "ai_interval": world.ai_interval,
+        "player_count": world.player_count,
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
+    _current_session_id = session_store.create_session(_world_settings)
+    world.set_session_id(_current_session_id)
+    decision_log.start_session(_current_session_id)
+    replay_store.start_session(_current_session_id)
+    world.reset_agents(Agent, player_count=player_count)
+    await manager.broadcast({"type": "reset", "data": world.get_state()})
+    return {"status": "World reset successful", "player_count": player_count, "session_id": _current_session_id}
+
+@app.post("/settings/ai_interval", dependencies=[Depends(verify_admin_token)])
+async def set_ai_interval(interval: int):
+    world.ai_interval = max(0, interval)
+    world._save_history()
+    return {"status": "Interval updated", "new_interval": world.ai_interval}
+
+
 @app.get("/settings/ai")
 async def get_ai_settings():
     return {
+        "scope": "catalog_default",
+        "note": "Perfis por agente continuam sendo a fonte de verdade. Esta configuracao salva apenas o preset/catalogo auxiliar da UI.",
         "ai_provider": world.ai_provider,
         "ai_model": world.ai_model,
-        "omniroute_url": world.omniroute_url
+        "omniroute_url": world.omniroute_url,
     }
+
 
 @app.post("/settings/ai", dependencies=[Depends(verify_admin_token)])
 async def set_ai_settings(req: AISettingsRequest):
-    world.ai_provider = req.ai_provider
-    world.ai_model = req.ai_model
-    world.omniroute_url = req.omniroute_url
+    provider = _normalize_provider(req.ai_provider)
+    world.ai_provider = provider
+    world.ai_model = (req.ai_model or "").strip() or _default_model_for_provider(provider)
+    world.omniroute_url = _normalize_omni_base_url(req.omniroute_url)
     world._save_history()
-    logger.info(f"AI settings updated: provider={world.ai_provider}, model={world.ai_model}, url={world.omniroute_url}")
-    return {"status": "AI settings updated"}
+    logger.info(
+        "AI catalog settings updated: provider=%s model=%s url=%s",
+        world.ai_provider,
+        world.ai_model,
+        world.omniroute_url,
+    )
+    return {
+        "status": "AI catalog settings updated",
+        "scope": "catalog_default",
+        "ai_provider": world.ai_provider,
+        "ai_model": world.ai_model,
+        "omniroute_url": world.omniroute_url,
+    }
+
+
 @app.get("/models")
 async def get_models(provider: Optional[str] = None, url: Optional[str] = None):
-    """Proxy or return a list of available models for the specified or active provider."""
-    target_provider = provider or world.ai_provider
-    target_url = url or world.omniroute_url
-    
-    curated_gemini = [
-        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
-        {"id": "gemini-2.0-flash-lite-preview-02-05", "name": "Gemini 2.0 Flash Lite"},
-        {"id": "gemini-2.0-pro-exp-02-05", "name": "Gemini 2.0 Pro Experimental"},
-        {"id": "gemini-2.0-flash-thinking-exp-01-21", "name": "Gemini 2.0 Thinking Exp"},
-        {"id": "gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash Exp"},
-        {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
-        {"id": "gemini-1.5-flash-8b", "name": "Gemini 1.5 Flash-8B"},
-        {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
-        {"id": "gemini-1.0-pro", "name": "Gemini 1.0 Pro"},
+    """Lista modelos de um endpoint OpenAI-compatible sem substituir o fluxo de profiles."""
+    target_provider = _normalize_provider(provider or world.ai_provider)
+    target_url = _normalize_omni_base_url(url or world.omniroute_url)
+
+    final_models: list[dict] = []
+    seen_ids: set[str] = set()
+
+    def add_model(model_id: str, name: str, source: str = "curated") -> None:
+        if model_id and model_id not in seen_ids:
+            final_models.append({"id": model_id, "name": name, "source": source})
+            seen_ids.add(model_id)
+
+    builtin_profiles = [
+        p for p in BUILTIN_PROFILES.values()
+        if _normalize_provider(p.provider) == target_provider
     ]
-    
+    for profile in builtin_profiles:
+        add_model(profile.model, f"{profile.profile_id} ({profile.model})", "builtin_profile")
+
     curated_omni = [
-        {"id": "qwen/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B (OpenRouter)"},
-        {"id": "qwen/qwen-2.5-7b-instruct", "name": "Qwen 2.5 7B (OpenRouter)"},
-        {"id": "qwen/qwen-2-vl-72b-instruct", "name": "Qwen 2 VL 72B"},
-        {"id": "qwen/qwen-2-5-coder-32b-instruct", "name": "Qwen 2.5 Coder 32B"},
-        {"id": "qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B (Local)"},
-        {"id": "qwen-2.5-32b-instruct", "name": "Qwen 2.5 32B (Local)"},
-        {"id": "qwen-2.5-14b-instruct", "name": "Qwen 2.5 14B (Local)"},
-        {"id": "qwen-2.5-7b-instruct", "name": "Qwen 2.5 7B (Local)"},
-        {"id": "gpt-4o", "name": "GPT-4o"},
-        {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
-        {"id": "claude-3-5-sonnet", "name": "Claude 3.5 Sonnet"},
-        {"id": "claude-3-5-haiku", "name": "Claude 3.5 Haiku"},
-        {"id": "meta-llama/llama-3.1-70b-instruct", "name": "Llama 3.1 70B"},
-        {"id": "meta-llama/llama-3.1-8b-instruct", "name": "Llama 3.1 8B"},
-        {"id": "mistralai/mistral-large-2407", "name": "Mistral Large 2"},
-        {"id": "mistralai/pixtral-12b-2409", "name": "Pixtral 12B"},
-        {"id": "gryphe/mythomax-l2-13b", "name": "MythoMax L2 13B"},
+        ("kr/claude-sonnet-4.5", "Claude Sonnet 4.5 via Kiro"),
+        ("kr/claude-haiku-4.5", "Claude Haiku 4.5 via Kiro"),
+        ("if/kimi-k2", "Kimi K2 via iFlow"),
+        ("if/qwen3-coder-plus", "Qwen3 Coder Plus via iFlow"),
+        ("gc/gemini-2.5-flash", "Gemini 2.5 Flash via gateway"),
+        ("groq/moonshotai/kimi-k2-instruct", "Kimi K2 Instruct via Groq"),
+        ("groq/llama-3.3-70b-versatile", "Llama 3.3 70B via Groq"),
+        ("gpt-4o-mini", "GPT-4o Mini"),
+        ("gpt-4o", "GPT-4o"),
     ]
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{target_url}/models",
+                headers={"Authorization": f"Bearer {_catalog_api_key()}"},
+            )
+            if response.status_code == 200:
+                payload = response.json()
+                for model in payload.get("data", []) if isinstance(payload, dict) else []:
+                    model_id = model.get("id")
+                    if model_id:
+                        add_model(model_id, model.get("name", model_id), "dynamic")
+            else:
+                logger.warning(
+                    "Failed to fetch OpenAI-compatible models from %s: %s",
+                    target_url,
+                    response.status_code,
+                )
+    except Exception as exc:
+        logger.error("Error proxying OpenAI-compatible models from %s: %s", target_url, exc)
 
-    final_models = []
-    seen_ids = set()
+    for model_id, name in curated_omni:
+        add_model(model_id, name)
 
-    if target_provider == "gemini":
-        # 1. Try to fetch dynamic models from SDK
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                from google import genai
-                client = genai.Client(api_key=gemini_key)
-                for m in client.models.list():
-                    mid = m.name.replace("models/", "")
-                    # Filter: Only models starting with "gemini" or "gemma", excluding common non-chat ones
-                    starts_with_allowed = mid.startswith("gemini") or mid.startswith("gemma")
-                    is_not_aux = all(x not in mid.lower() for x in ["embedding", "vision", "image", "aqa"])
-                    
-                    if starts_with_allowed and is_not_aux and mid not in seen_ids:
-                        final_models.append({"id": mid, "name": m.display_name})
-                        seen_ids.add(mid)
-            except Exception as e:
-                logger.error(f"Error fetching dynamic Gemini models: {e}")
-        
-        # 2. Supplementary merge with Curated Gemini
-        for m in curated_gemini:
-            if m["id"] not in seen_ids:
-                final_models.append(m)
-                seen_ids.add(m["id"])
-                
-    else:
-        # OMNIROUTE / OpenAI style
-        base_url = target_url.replace("/chat/completions", "")
-        models_url = f"{base_url}/models"
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                headers = {}
-                if OMNIROUTE_API_KEY:
-                    headers["Authorization"] = f"Bearer {OMNIROUTE_API_KEY}"
-                
-                resp = await client.get(models_url, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # OpenAI /models usually returns a list in "data"
-                    api_data = data.get("data", []) if isinstance(data, dict) else []
-                    for m in api_data:
-                        mid = m["id"]
-                        if mid not in seen_ids:
-                            final_models.append({"id": mid, "name": m.get("name", mid)})
-                            seen_ids.add(mid)
-                    
-                    # If we got results from API, return them immediately (no fallback merging)
-                    if final_models:
-                        final_models.sort(key=lambda x: x["id"])
-                        return {"models": final_models}
-                else:
-                    logger.warning(f"Failed to fetch OMNIROUTE models: {resp.status_code}")
-        except Exception as e:
-            logger.error(f"Error proxying OMNIROUTE models: {e}")
-
-        # 2. Last resort fallback (only if API fails or is empty)
-        for m in curated_omni:
-            if m["id"] not in seen_ids:
-                final_models.append(m)
-                seen_ids.add(m["id"])
-
-    # Stabilize the list order
-    final_models.sort(key=lambda x: x["id"])
-
-    # Always ensure a default
     if not final_models:
-        final_models.append({"id": "default", "name": "Padrão do Provedor"})
+        add_model(_default_model_for_provider(target_provider), "Padrao do provider", "default")
 
-    return {"models": final_models}
+    return {
+        "scope": "catalog",
+        "provider": target_provider,
+        "base_url": target_url,
+        "models": final_models,
+    }
 
+# ── Sessions, Scoreboard & Replay ─────────────────────────────────────────────
 
-# --- Remote Agent API ---
+@app.get("/sessions")
+async def list_sessions(limit: int = 20):
+    return {"sessions": session_store.get_sessions(limit=limit)}
+
+@app.get("/sessions/{session_id}/replay")
+async def get_replay(session_id: str):
+    frames = replay_store.load_replay(session_id)
+    if not frames:
+        raise HTTPException(404, "Sessão não encontrada ou sem dados de replay")
+    return {"session_id": session_id, "total_frames": len(frames), "frames": frames}
+
+@app.get("/sessions/{session_id}/replay/frame/{tick}")
+async def get_replay_frame(session_id: str, tick: int):
+    frames = replay_store.load_replay(session_id)
+    frame = next((f for f in frames if f["tick"] == tick), None)
+    if not frame:
+        raise HTTPException(404, f"Frame tick={tick} não encontrado")
+    return frame
+
+@app.get("/world/scoreboard")
+async def get_scoreboard(limit: int = 50):
+    return {"scoreboard": session_store.get_scoreboard(limit=limit)}
+
+# ── Profiles ──────────────────────────────────────────────────────────────────
+
+@app.get("/profiles")
+async def get_profiles():
+    return {"profiles": list_profiles()}
+
+# ── Agent Registration (T14) ──────────────────────────────────────────────────
+
+@app.post("/agents/register")
+@_rate_limit("10/minute")
+async def register_agent(request: Request, reg: AgentRegistration):
+    """Owner registra um agente customizado na ilha."""
+    if reg.profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Profile '{reg.profile_id}' não existe. Disponíveis: {list(BUILTIN_PROFILES.keys())}")
+
+    max_agents = getattr(world, 'player_count', 12) + 4  # permite agentes externos além dos NPCs
+    if len(world.agents) >= max_agents:
+        raise HTTPException(409, "Limite de agentes atingido")
+
+    profile = get_profile(reg.profile_id)
+    agent_id = f"agent_{reg.owner_id}_{int(time.time())}"
+
+    new_agent = Agent(
+        name=reg.agent_name[:30],
+        personality=reg.persona[:200],
+        start_x=random.randint(2, 17),
+        start_y=random.randint(2, 17),
+        agent_id=agent_id,
+    )
+    new_agent.profile_id = reg.profile_id
+    new_agent.owner_id = reg.owner_id
+    new_agent.token_budget = profile.token_budget
+    new_agent.cooldown_ticks = profile.cooldown_ticks
+
+    memory_store.load(new_agent)
+    world.add_agent(new_agent)
+    logger.info(f"🤖 Registered agent: {reg.agent_name} [{reg.profile_id}] by {reg.owner_id}")
+    asyncio.create_task(webhook_manager.fire_event("agent_registered", {
+        "agent_id": agent_id,
+        "agent_name": reg.agent_name,
+        "owner_id": reg.owner_id,
+        "profile_id": reg.profile_id,
+        "tick": world.ticks,
+    }))
+
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "join", "event_msg": f"{reg.agent_name} ENTROU NA ILHA! (Modelo: {profile.model})", "agent_id": agent_id}]
+    })
+
+    return {
+        "agent_id": agent_id,
+        "message": f"{reg.agent_name} entrou na ilha!",
+        "profile": reg.profile_id,
+        "model": profile.model,
+        "token_budget": profile.token_budget,
+    }
+
+@app.get("/agents/{agent_id}/state")
+async def get_agent_state(agent_id: str):
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "health": agent.hp,
+        "position": {"x": agent.x, "y": agent.y},
+        "tokens_used": getattr(agent, "tokens_used", 0),
+        "token_budget": getattr(agent, "token_budget", 10000),
+        "profile_id": getattr(agent, "profile_id", "claude-kiro"),
+        "benchmark": getattr(agent, "benchmark", {}),
+        "recent_memory": agent.memory[-5:] if hasattr(agent, "memory") else [],
+    }
+
+# ── Tournaments (T15) ─────────────────────────────────────────────────────────
+
+@app.post("/tournaments", dependencies=[Depends(verify_admin_token)])
+@_rate_limit("5/minute")
+async def create_tournament(request: Request, config: TournamentConfig):
+    t_id = f"tournament_{int(time.time())}"
+    config_data = config.model_dump()
+    TOURNAMENTS[t_id] = {
+        "id": t_id,
+        "name": config.name,
+        "status": "waiting",
+        "config": config_data,
+        "max_agents": config.max_agents,
+        "duration_ticks": config.duration_ticks,
+        "reset_on_finish": config.reset_on_finish,
+        "allowed_profiles": config.allowed_profiles or list(BUILTIN_PROFILES.keys()),
+        "start_tick": None,
+        "started_at": None,
+        "end_tick": None,
+        "registered_agents": [],
+    }
+    return {"tournament_id": t_id, "config": config_data}
+
+@app.post("/tournaments/{t_id}/join")
+async def join_tournament(request: Request, t_id: str, reg: AgentRegistration):
+    t = TOURNAMENTS.get(t_id)
+    if not t:
+        raise HTTPException(404, "Torneio não existe")
+    if t["status"] != "waiting":
+        raise HTTPException(409, "Torneio já começou")
+    if len(t["registered_agents"]) >= t["max_agents"]:
+        raise HTTPException(409, "Torneio lotado")
+    if t["allowed_profiles"] and reg.profile_id not in t["allowed_profiles"]:
+        raise HTTPException(400, f"Perfil não permitido. Permitidos: {t['allowed_profiles']}")
+
+    result = await register_agent(request, reg)
+    t["registered_agents"].append(result["agent_id"])
+    return result
+
+@app.post("/tournaments/{t_id}/start", dependencies=[Depends(verify_admin_token)])
+async def start_tournament(t_id: str):
+    t = TOURNAMENTS.get(t_id)
+    if not t:
+        raise HTTPException(404, "Torneio não existe")
+    t["status"] = "active"
+    t["start_tick"] = world.ticks
+    t["started_at"] = time.time()
+    t["end_tick"] = world.ticks + t["duration_ticks"]
+    world.active_tournament_id = t_id
+    world.tournament_end_tick = t["end_tick"]
+    _notified_finished_tournaments.discard(t_id)
+    return {"message": "Torneio iniciado!", "end_tick": t["end_tick"]}
+
+@app.get("/tournaments")
+async def list_tournaments():
+    return {"tournaments": list(TOURNAMENTS.values())}
+
+# ── Remote Agent API (mantido) ────────────────────────────────────────────────
 
 @app.post("/join")
 async def join_island(req: JoinRequest):
-    # 1. Validar se o ID está na lista de autorizados
     if req.agent_id not in AUTHORIZED_IDS:
-        logger.warning(f"Tentativa de entrada com ID não autorizado.")
         raise HTTPException(status_code=401, detail="ID de Acesso não autorizado.")
 
-    # 2. Verificar se o ID já está em uso na ilha
     existing_agent = next((a for a in world.agents if a.id == req.agent_id), None)
     if existing_agent:
         if existing_agent.is_alive:
             raise HTTPException(status_code=400, detail="Este ID já está em uso por um agente Vivo.")
         else:
-            # Se está morto, removemos o corpo antigo para dar lugar à nova entrada
-            logger.info(f"Agent {existing_agent.name} with ID {req.agent_id} is dead. Removing to allow replacement.")
             world.remove_agent(req.agent_id)
 
-    # Create a new remote agent
     new_agent = Agent(req.name, req.personality, 10, 10, is_remote=True, agent_id=req.agent_id)
     world.add_agent(new_agent)
-    logger.info(f"Remote agent joined: {new_agent.name}")
-    
-    # Broadcast join event
+
     await manager.broadcast({
-        "type": "update", 
-        "data": world.get_state(), 
+        "type": "update", "data": world.get_state(),
         "events": [{"action": "join", "event_msg": f"{new_agent.name} CHEGOU NA ILHA!", "agent_id": new_agent.id, "name": new_agent.name}]
     })
-    
-    return {
-        "status": "Joined successfully",
-        "agent_id": new_agent.id,
-        "name": new_agent.name,
-        "personality": new_agent.personality,
-        "coords": [new_agent.x, new_agent.y]
-    }
+
+    return {"status": "Joined successfully", "agent_id": new_agent.id, "name": new_agent.name,
+            "personality": new_agent.personality, "coords": [new_agent.x, new_agent.y]}
 
 @app.get("/agent/{agent_id}/context")
 async def get_agent_context(agent_id: str):
     agent = next((a for a in world.agents if a.id == agent_id), None)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
     context = world._get_context_for_agent(agent)
-    # Add status info to context for the remote agent
     context["status"] = {
         "hp": agent.hp,
         "hunger": agent.hunger,
@@ -332,7 +677,9 @@ async def get_agent_context(agent_id: str):
         "is_alive": agent.is_alive,
         "is_zombie": getattr(agent, "is_zombie", False),
         "inventory": agent.inventory,
-        "pos": [agent.x, agent.y]
+        "pos": [agent.x, agent.y],
+        "tokens_used": getattr(agent, "tokens_used", 0),
+        "token_budget": getattr(agent, "token_budget", 10000),
     }
     return context
 
@@ -341,44 +688,261 @@ async def agent_action(agent_id: str, req: ActionRequest):
     agent = next((a for a in world.agents if a.id == agent_id), None)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
     if not agent.is_alive:
         return {"status": "Agent is dead", "action": "ignored"}
 
-    # Construct the internal action format
-    action_data = {
-        "agent_id": agent.id,
-        "name": agent.name,
-        "thought": req.thought,
-        "action": req.action,
-        "speak": req.speak,
-        "target_name": req.target_name
-    }
-    # Merge params (dx, dy, target_x, target_y)
+    action_data = {"agent_id": agent.id, "name": agent.name, "thought": req.thought,
+                   "action": req.action, "speak": req.speak, "target_name": req.target_name}
     for k, v in req.params.items():
         action_data[k] = v
-        
-    # Apply action to the world
+
     world._apply_action(agent, action_data)
-    
-    # Send event to world events list so frontends see it
     world.ai_events.append(action_data)
-    
-    if req.speak:
-        logger.info(f"[REMOTE CHAT] {agent.name}: {req.speak}")
-        
     return {"status": "Action processed", "action": req.action}
 
-@app.delete("/agent/{agent_id}")
+@app.delete("/agent/{agent_id}", dependencies=[Depends(verify_admin_token)])
 async def delete_agent(agent_id: str):
+    """Remove um agente da ilha. Requer X-Admin-Token."""
     success = world.remove_agent(agent_id)
     if success:
-        # Broadcast removal to frontends
         await manager.broadcast({
-            "type": "update", 
-            "data": world.get_state(),
-            "events": [{"action": "busy", "event_msg": f"UM AGENTE FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
+            "type": "update", "data": world.get_state(),
+            "events": [{"action": "busy", "event_msg": "UM AGENTE FOI REMOVIDO PELO ADMINISTRADOR.", "agent_id": agent_id}]
         })
         return {"status": "Agent removed", "agent_id": agent_id}
-    else:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    raise HTTPException(status_code=404, detail="Agent not found")
+
+# ═══════════════════════════════════════════════════════════════════════
+# T18 — Rate Limiting (slowapi)
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/rate-limit/status")
+async def rate_limit_status(request: Request):
+    """Informa se o rate limit está ativo e as regras configuradas."""
+    return {
+        "rate_limit_enabled": RATE_LIMIT_ENABLED,
+        "limits": {
+            "POST /agents/register": "10/minute per IP",
+            "POST /tournaments": "5/minute per IP (admin)",
+            "POST /webhooks/register": "20/hour per IP",
+        } if RATE_LIMIT_ENABLED else "Rate limiting not active (slowapi not installed)"
+    }
+
+# ═══════════════════════════════════════════════════════════════════════
+# T19 — Exportação CSV/JSON
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/sessions/{session_id}/export")
+async def export_session(session_id: str, format: str = "json"):
+    """
+    Exporta os frames de replay de uma sessão como JSON ou CSV.
+    Query param: ?format=json (default) | csv
+    """
+    frames = replay_store.load_replay(session_id)
+    if not frames:
+        raise HTTPException(404, f"Sessão '{session_id}' não encontrada ou sem frames.")
+
+    if format == "csv":
+        output = io.StringIO()
+        if frames:
+            # Flatten frames para CSV
+            fieldnames = ["tick", "session_id", "agent_count"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for frame in frames:
+                writer.writerow({
+                    "tick": frame.get("tick", ""),
+                    "session_id": session_id,
+                    "agent_count": len(frame.get("state", {}).get("agents", [])),
+                })
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=session_{session_id}.csv"}
+        )
+
+    # JSON default
+    return {"session_id": session_id, "frame_count": len(frames), "frames": frames}
+
+@app.get("/world/scoreboard/export")
+async def export_scoreboard(format: str = "json"):
+    """
+    Exporta o scoreboard global como JSON ou CSV.
+    Query param: ?format=json | csv
+    """
+    board = session_store.get_scoreboard(limit=200)
+    if format == "csv":
+        output = io.StringIO()
+        if board:
+            writer = csv.DictWriter(output, fieldnames=list(board[0].keys()))
+            writer.writeheader()
+            writer.writerows(board)
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=scoreboard.csv"}
+        )
+    return {"scoreboard": board, "total": len(board)}
+
+@app.get("/sessions/{session_id}/decisions/export")
+async def export_decisions(session_id: str, format: str = "json"):
+    """Exporta o decision log NDJSON de uma sessão como JSON ou CSV."""
+    import os
+    log_files = [f for f in os.listdir("logs") if session_id in f and f.endswith(".ndjson")]
+    if not log_files:
+        raise HTTPException(404, f"Decision log para sessão '{session_id}' não encontrado.")
+
+    records = []
+    with open(os.path.join("logs", log_files[0])) as f:
+        for line in f:
+            if line.strip():
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    pass
+
+    if format == "csv" and records:
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=list(records[0].keys()), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(records)
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=decisions_{session_id}.csv"}
+        )
+    return {"session_id": session_id, "decisions": records, "total": len(records)}
+
+# ═══════════════════════════════════════════════════════════════════════
+# T20 — Tournament Status & Leaderboard aprimorado
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/tournaments/{tournament_id}/status")
+async def tournament_status(tournament_id: str):
+    """Retorna status detalhado de um torneio com progresso e estimativa de encerramento."""
+    if tournament_runner is None:
+        raise HTTPException(503, "TournamentRunner não iniciado")
+    status = tournament_runner.get_status(tournament_id)
+    if not status:
+        raise HTTPException(404, f"Torneio '{tournament_id}' não encontrado")
+    return status
+
+@app.get("/tournaments/{tournament_id}/leaderboard")
+async def tournament_leaderboard(tournament_id: str):
+    """Retorna leaderboard ao vivo ou final do torneio."""
+    if tournament_id not in TOURNAMENTS:
+        raise HTTPException(404, f"Torneio '{tournament_id}' não encontrado")
+    leaderboard = tournament_runner.get_leaderboard(tournament_id) if tournament_runner else []
+    return {
+        "tournament_id": tournament_id,
+        "status": TOURNAMENTS[tournament_id].get("status", "unknown"),
+        "leaderboard": leaderboard,
+    }
+
+# ═══════════════════════════════════════════════════════════════════════
+# T22 — Memória Persistente entre sessões
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/memories")
+async def list_memories(owner_id: Optional[str] = None):
+    """Lista agentes com memória persistente salva."""
+    agents_with_memory = memory_store.list_agents_with_memory()
+    if owner_id:
+        agents_with_memory = [m for m in agents_with_memory if m["owner_id"] == owner_id]
+    return {"memories": agents_with_memory, "total": len(agents_with_memory)}
+
+@app.post("/memories/save/{agent_id}")
+async def save_agent_memory(agent_id: str):
+    """Salva manualmente a memória de um agente no SQLite."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    if not getattr(agent, "owner_id", ""):
+        raise HTTPException(400, "Agente não tem owner_id — memória persistente requer owner")
+    memory_store.save(agent)
+    return {"status": "memory_saved", "agent_id": agent_id, "agent_name": agent.name}
+
+@app.delete("/memories/{owner_id}/{agent_name}", dependencies=[Depends(verify_admin_token)])
+async def delete_agent_memory(owner_id: str, agent_name: str):
+    """Remove a memória persistente de um agente (admin)."""
+    deleted = memory_store.delete(owner_id, agent_name)
+    if not deleted:
+        raise HTTPException(404, "Memória não encontrada")
+    return {"status": "deleted", "owner_id": owner_id, "agent_name": agent_name}
+
+# ═══════════════════════════════════════════════════════════════════════
+# T24 — Webhooks de Notificação
+# ═══════════════════════════════════════════════════════════════════════
+
+class WebhookRegistration(BaseModel):
+    owner_id: str
+    url: str
+    events: list[str] = ["all"]
+    secret: str = ""
+
+@app.post("/webhooks/register")
+@_rate_limit("20/hour")
+async def register_webhook(request: Request, reg: WebhookRegistration):
+    """
+    Registra uma URL de webhook para receber notificações de eventos.
+    Eventos válidos: death, win, zombie, tournament_end, agent_registered, all
+    """
+    result = webhook_manager.register(
+        owner_id=reg.owner_id,
+        url=reg.url,
+        events=reg.events,
+        secret=reg.secret,
+    )
+    return result
+
+@app.get("/webhooks/{owner_id}")
+async def list_webhooks(owner_id: str):
+    """Lista todos os webhooks registrados para um owner."""
+    hooks = webhook_manager.list_for_owner(owner_id)
+    return {"owner_id": owner_id, "webhooks": hooks}
+
+@app.delete("/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str, owner_id: str):
+    """Remove um webhook pelo ID (requer owner_id para validação)."""
+    deleted = webhook_manager.delete(webhook_id, owner_id)
+    if not deleted:
+        raise HTTPException(404, "Webhook não encontrado ou owner incorreto")
+    return {"status": "deleted", "webhook_id": webhook_id}
+
+@app.post("/webhooks/test/{owner_id}", dependencies=[Depends(verify_admin_token)])
+async def test_webhook(owner_id: str):
+    """Dispara um evento de teste para os webhooks do owner (admin)."""
+    fired = await webhook_manager.fire_event("test", {
+        "message": "BBBia webhook test",
+        "owner_id": owner_id,
+        "tick": world.ticks,
+    })
+    return {"status": "fired", "webhooks_notified": fired}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Info geral do sistema (summary de todos os módulos ativos)
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/system/info")
+async def system_info():
+    """Retorna informações de todos os módulos ativos no backend."""
+    return {
+        "version": "turbinada-v0.5",
+        "ticks": world.ticks,
+        "session_id": _current_session_id,
+        "modules": {
+            "thinker": thinker is not None,
+            "tournament_runner": tournament_runner is not None and tournament_runner._running,
+            "memory_store": True,
+            "webhook_manager": True,
+            "replay_store": True,
+            "decision_log": True,
+        },
+        "rate_limit": RATE_LIMIT_ENABLED,
+        "active_tournaments": len([t for t in TOURNAMENTS.values() if t.get("status") in ("active", "running")]),
+        "registered_webhooks": webhook_manager.conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0],
+        "agents_with_memory": len(memory_store.list_agents_with_memory()),
+    }
