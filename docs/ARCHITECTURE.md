@@ -233,7 +233,7 @@ fastapi, uvicorn    # Framework web + ASGI
 pydantic            # Validação de schemas
 python-dotenv       # Config por env
 openai              # Adapter OpenAI-compatible (OmniRoute)
-google-genai        # Adapter Gemini nativo (opcional)
+google-genai        # Planejado p/ adapter Gemini nativo (ainda não usado no backend)
 slowapi             # Rate limiting
 httpx               # HTTP async (webhooks + /models proxy)
 pytest              # Testes unitários (33 casos)
