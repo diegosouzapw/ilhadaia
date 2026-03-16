@@ -98,6 +98,12 @@ async function updateTickInterval(val) {
     }
 }
 
+function updateVolume(val) {
+    globalVolume = parseFloat(val);
+    localStorage.setItem('bbb_volume', globalVolume);
+    console.log("Volume updated to:", globalVolume);
+}
+
 // AI Settings Modal Logic
 const settingsToggle = document.getElementById('settings-toggle');
 const settingsModal = document.getElementById('settings-modal');
@@ -283,6 +289,7 @@ async function toggleFastMode(isFast) {
 }
 
 function playSynthSound(type) {
+    if (globalVolume <= 0) return; // Silent
     if (audioCtx.state === 'suspended') audioCtx.resume();
     
     const oscillator = audioCtx.createOscillator();
@@ -301,7 +308,7 @@ function playSynthSound(type) {
         oscillator.frequency.setValueAtTime(120, now);
         oscillator.frequency.exponentialRampToValueAtTime(10, now + 0.1);
         gainNode.gain.setValueAtTime(0.02 * vol, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
         oscillator.start(now);
         oscillator.stop(now + 0.1);
     } else if (type === 'pick') {
@@ -309,7 +316,7 @@ function playSynthSound(type) {
         oscillator.frequency.setValueAtTime(440, now);
         oscillator.frequency.exponentialRampToValueAtTime(880, now + 0.15);
         gainNode.gain.setValueAtTime(0.1 * vol, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
         oscillator.start(now);
         oscillator.stop(now + 0.2);
     } else if (type === 'eat' || type === 'drink') {
@@ -317,7 +324,7 @@ function playSynthSound(type) {
         oscillator.frequency.setValueAtTime(200, now);
         oscillator.frequency.exponentialRampToValueAtTime(60, now + 0.25);
         gainNode.gain.setValueAtTime(0.05 * vol, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
         oscillator.start(now);
         oscillator.stop(now + 0.3);
     }
