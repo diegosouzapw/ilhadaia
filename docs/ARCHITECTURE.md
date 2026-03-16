@@ -1,165 +1,240 @@
-# Arquitetura Atual
+# Arquitetura — BBBia v0.6 (feature-diego)
 
-Estado documentado desta branch:
+> Estado: **Produção** | Backend: FastAPI 0.111 | Python 3.12 | Março 2026
 
-- backend monolitico em `backend/main.py`
-- frontend estatico servido pelo proprio FastAPI em `/frontend/*`
-- runtime de IA centralizado em `runtime/thinker.py`
-- persistencia local em SQLite + NDJSON
-- operacao single-process / single-worker
+---
 
-## Visao geral
+## Visão Geral
 
-```text
-Browser
-  |\
-  | +--> /frontend/index.html
-  | +--> /frontend/dashboard.html
-  | +--> /frontend/models.html
-  |
-  +----> REST + WebSocket (/ws)
-            |
-            v
-        FastAPI app
-            |
-            +--> World (simulacao)
-            +--> Thinker (orquestracao de IA)
-            +--> TournamentRunner
-            +--> SessionStore / MemoryStore / ReplayStore / DecisionLog / WebhookManager
-            |
-            v
-      Endpoint OpenAI-compatible (OmniRoute por default)
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          FRONTEND (Browser)                              │
+│                                                                          │
+│  index.html          dashboard.html        models.html                   │
+│  ├── Three.js 3D     ├── Chart.js          ├── Testar modelos            │
+│  ├── main.js         ├── KPIs ao vivo      ├── Registrar agentes         │
+│  ├── benchmark.js    ├── Scoreboard        └── Inspecionar perfis        │
+│  ├── Nav global      └── Export CSV/JSON                                 │
+│  ├── Sidebar (Replay, Timeline, Benchmark HUD, Atalhos)                  │
+│  └── WebSocket /ws                                                       │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │ HTTP REST + WebSocket /ws
+┌────────────────────────────▼─────────────────────────────────────────────┐
+│                       BACKEND (FastAPI + asyncio)                        │
+│                         Porta 8001 | Single Worker                       │
+│                                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────────┐     │
+│  │   World     │  │   Thinker    │  │   TournamentRunner          │     │
+│  │  (Motor)    │  │ (Orquestrador│  │  (auto-lifecycle T20)       │     │
+│  │  20×20 grid │  │  de decisões)│  │  leaderboard + finalize     │     │
+│  └──────┬──────┘  └──────┬───────┘  └─────────────────────────────┘     │
+│         │                │                                                │
+│  ┌──────▼────────────────▼─────────────────────────────────────────┐    │
+│  │                         Agent                                   │    │
+│  │  vitals  inventory  can_think()  token_budget  profile_id       │    │
+│  │  AgentMemory: short_term + episodic + relational + benchmark    │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌──────────────┐  ┌────────────────────────────────────────────────┐   │
+│  │   Profiles   │  │         AI Adapters                            │   │
+│  │  7 perfis IA │  │  OpenAICompatibleAdapter (OmniRoute + qualquer │   │
+│  │  (OmniRoute) │  │  endpoint OpenAI-compatible)                   │   │
+│  └──────────────┘  └────────────────┬───────────────────────────────┘   │
+│                                     │ HTTPS                              │
+└─────────────────────────────────────┼────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────▼────────────────────────────────────┐
+│                      PROVIDERS DE IA (via OmniRoute)                     │
+│                                                                          │
+│  OmniRoute  http://192.168.0.15:20128/v1  (ou OMNIROUTER_URL)           │
+│  ├── kr/ → Kiro (Claude Sonnet/Haiku 4.5 — grátis, ilimitado)           │
+│  ├── if/ → iFlow (Kimi K2, Qwen3 — grátis, ilimitado)                   │
+│  ├── gc/ → Gemini CLI (Gemini 2.5 Flash — 180K tok/mês grátis)          │
+│  └── groq/ → Groq API (Llama 3.3 70B, Kimi K2 — 30 RPM grátis)         │
+└──────────────────────────────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────────────────────┐
+│                        STORAGE (SQLite WAL)                              │
+│  backend/data/ilhadaia.db  (não versionado)                              │
+│  ├── sessions          (criação, encerramento, winner)                   │
+│  ├── agent_scores      (scoreboard multi-sessão)                         │
+│  ├── world_settings_history                                              │
+│  ├── agent_memories    (memória persistente entre sessões)               │
+│  └── webhooks          (URLs + eventos + HMAC secret)                    │
+│                                                                          │
+│  backend/logs/*.ndjson         (decision log por sessão)                 │
+│  backend/data/replays/*.ndjson (snapshots a cada 5 ticks)                │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Componentes principais
+---
 
-### `backend/main.py`
+## Frontend — 3 Interfaces
 
-Responsabilidades:
+### `index.html` — Ilha ao Vivo
+- Three.js 3D rendering com OrbitControls
+- WebSocket `/ws` para estado em tempo real
+- `benchmark.js`: HUD de benchmark, replay, modal de agente, timeline de eventos
+- Sidebar direita: atalhos rápidos (Dashboard/Modelos), Benchmark HUD, Timeline, Replay
+- Nav global flutuante com links para as 3 telas
+- Modal `settings-modal` para catálogo de IA (preset auxiliar da UI via `/settings/ai` + `/models`)
+- Botão ⚙️ para abrir catálogo de modelos do OmniRoute dinamicamente
 
-- inicializar a aplicacao FastAPI
-- montar `StaticFiles` em `/frontend`
-- criar e encerrar sessao ativa via lifespan
-- expor endpoints REST e WebSocket
-- rodar o `world_loop()` e disparar snapshots, score e webhooks
+### `dashboard.html` — Análise de Sessões
+- KPIs ao vivo (ticks, sessões, agentes, torneios, rate limit)
+- Gráficos Chart.js: tokens por agente, scores, distribuição de perfis
+- Scoreboard global com filtros
+- Export CSV/JSON de sessões e decisões
+- Nav padronizada (Dashboard ativo em amarelo)
 
-Estado global mantido aqui:
+### `models.html` — Gerenciador de Modelos
+- Lista de perfis builtin via `GET /profiles` (sincronizada com backend)
+- Testes de modelo individuais ou em massa com log de latência
+- Tabela de agentes ativos (via WebSocket temporário)
+- Formulário de registro dinâmico — dropdown de perfis vem do backend
+- Nav padronizada (Modelos ativo em roxo)
 
-- `world`
-- `_current_session_id`
-- `TOURNAMENTS`
-- instancias de `DecisionLog`, `SessionStore`, `ReplayStore`, `MemoryStore`, `WebhookManager`
+---
 
-### `backend/world.py`
+## Backend — Módulos
 
-Responsabilidades:
+### `world.py` — Motor de Simulação
+- Grid 20×20 com BFS pathfinding
+- Ciclo dia/noite, zumbis, desintegração solar
+- Distribuição de turnos por `ai_interval`
+- Broadcast de eventos via WebSocket
+- Campos auxiliares: `ai_provider`, `ai_model`, `omniroute_url` (preset de catálogo da UI)
 
-- manter o `WorldState`
-- executar `tick()`
-- controlar ciclo dia/noite, morte, zumbis e respawn
-- resetar o elenco inicial
-- serializar o estado enviado ao frontend e ao replay
+### `agent.py` — Agente IA
+- Vitals: hp, hunger, thirst, friendship
+- Budget: `token_budget`, `tokens_used`, `cooldown_ticks`, `can_think()`
+- Memória: `AgentMemory` (4 camadas)
+- Benchmark: score, decisions_made, cost_usd, invalid_actions
+- `profile_id` — vincula ao perfil de IA do catálogo
 
-Detalhe importante desta branch:
+### `runtime/profiles.py` — Catálogo de Perfis
+7 perfis builtin, todos via OmniRoute (mesmo endpoint, modelo diferente):
 
-- os NPCs iniciais sao resetados com perfis gratuitos: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`
+| Perfil | Modelo | Provider | Custo |
+|--------|--------|----------|-------|
+| `claude-kiro` ⭐ padrão | `kr/claude-sonnet-4.5` | Kiro | grátis |
+| `claude-haiku` | `kr/claude-haiku-4.5` | Kiro | grátis |
+| `kimi-thinking` | `if/kimi-k2` | iFlow | grátis |
+| `qwen-coder` | `if/qwen3-coder-plus` | iFlow | grátis |
+| `kimi-groq` | `groq/moonshotai/kimi-k2-instruct` | Groq | grátis |
+| `gemini-flash` | `gc/gemini-2.5-flash` | Gemini CLI | grátis |
+| `llama-groq` | `groq/llama-3.3-70b-versatile` | Groq | grátis |
 
-### `backend/runtime/thinker.py`
+Configuração:
+- `OMNIROUTER_URL` (aliases: `OMNIROUTE_URL`, `OPENAI_BASE_URL`)
+- `OMNIROUTER_API_KEY` (aliases: `OMNIROUTE_API_KEY`, `OPENAI_API_KEY`)
 
-Responsabilidades:
+### `runtime/thinker.py` — Orquestrador
+1. Verifica `can_think()` (budget + cooldown)
+2. Constrói contexto (world state + memória relevante via T21)
+3. Chama `OpenAICompatibleAdapter` com o perfil do agente
+4. Valida resposta com `ActionDecision` (Pydantic)
+5. Atualiza memória e benchmark
+6. Loga decisão em NDJSON
 
-- resolver o perfil do agente
-- instanciar o adapter correto
-- montar contexto + memoria relevante
-- validar structured output via `ActionDecision`
-- registrar decisao em `DecisionLog`
+### `runtime/memory.py` — AgentMemory (T10)
+| Camada | Tipo | Limite |
+|--------|------|--------|
+| `short_term` | Ações recentes | deque max 10 |
+| `episodic` | Eventos marcantes | max 50 |
+| `relational` | Opiniões sobre outros agentes | sem limite |
+| `benchmark` | Métricas de performance | dict |
 
-Fallback atual:
+### `runtime/relevance.py` — Busca Episódica (T21)
+- TF-IDF simplificado + pesos por tipo de evento
+- Decaimento temporal exponencial
+- Retorna top-K episódios mais relevantes
+- Sem dependências externas
 
-- perfil default e fallback tecnico: `claude-kiro`
+### `runtime/tournament_runner.py` — TournamentRunner (T20)
+- Loop assíncrono (a cada 10s)
+- Finaliza automaticamente quando `duration_ticks` é atingido
+- Calcula leaderboard final e dispara webhook `tournament_end`
 
-### `backend/runtime/profiles.py`
+### `storage/` — Persistência
+| Módulo | Tecnologia | O que armazena |
+|--------|-----------|----------------|
+| `session_store.py` | SQLite WAL | sessões, scores, world_settings |
+| `decision_log.py` | NDJSON | decisões de IA por sessão |
+| `replay_store.py` | NDJSON | snapshots por tick (a cada 5) |
+| `memory_store.py` | SQLite WAL | AgentMemory serializada por owner |
+| `webhook_manager.py` | SQLite WAL | URLs, eventos, fire_count |
 
-Catalogo builtin de 7 perfis.
+---
 
-Todos os perfis usam `provider="omnirouter"` e compartilham o mesmo eixo:
+## Fluxo de uma Decisão de IA
 
-- `OMNIROUTER_URL` como base default
-- `OMNIROUTER_API_KEY` como chave default
-- aliases opcionais `OPENAI_BASE_URL` e `OPENAI_API_KEY` para outros endpoints OpenAI-compatible
-
-### `backend/storage/*`
-
-- `session_store.py`: sessoes e scoreboard historico em SQLite
-- `memory_store.py`: memoria persistente para agentes com `owner_id`
-- `replay_store.py`: snapshots NDJSON por sessao
-- `decision_log.py`: NDJSON de decisoes por sessao
-- `webhook_manager.py`: cadastro e disparo de webhooks
-
-## Frontend
-
-### `frontend/index.html`
-
-- observer da ilha
-- usa WebSocket para estado ao vivo
-- HUD de benchmark agora pode ser arrastado e recolhido
-- ganhou navegacao global para `dashboard.html` e `models.html`
-
-### `frontend/dashboard.html`
-
-- analise de sessoes
-- consultas de scoreboard e exportacoes
-- navegacao consistente com as demais paginas
-
-### `frontend/models.html`
-
-- lista perfis retornados por `/profiles`
-- testa modelos individualmente
-- registra novos agentes via `POST /agents/register`
-- exibe agentes ativos com dados de benchmark
-
-## Fluxo de uma sessao
-
-```text
-startup
-  -> criar SessionStore/DecisionLog/ReplayStore
-  -> create_session()
-  -> world.reset_agents()
-  -> iniciar world_loop()
-
-world_loop()
-  -> world.tick()
-  -> upsert scores periodicamente
-  -> maybe_snapshot()
-  -> broadcast websocket
-  -> disparar webhooks assincronos
+```
+tick N
+  └─ World seleciona agente (por ai_interval ou paralelo)
+      └─ agent.can_think()? (budget + cooldown)
+          └─ Thinker.think(agent, world_context)
+              ├─ Relevance.get_relevant(episodes, context, tick)
+              ├─ SchemaPrompt = ActionDecision.get_json_schema_prompt()
+              ├─ OpenAICompatibleAdapter.complete(messages, profile)
+              ├─ ActionDecision.from_dict(parsed_json) → validação Pydantic
+              ├─ agent.agent_memory.add_short_term(action, thought, result)
+              ├─ agent.update_benchmark(tokens, cost, latency)
+              └─ DecisionLog.log(session, agent, action, tokens)
 ```
 
-## Artefatos de runtime
+---
 
-Com o comando recomendado (`cd backend && uvicorn main:app ...`), o runtime gera:
+## Endpoints Novos (feature-diego)
 
-- `backend/data/ilhadaia.db`
-- `backend/data/replays/*.replay.ndjson`
-- `backend/logs/*.ndjson`
-- `backend/hall_of_fame.json`
-- `backend/world_settings.json`
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `GET /settings/ai` | GET | Retorna preset auxiliar (provider/modelo/url) da UI |
+| `POST /settings/ai` | POST | Salva preset auxiliar da UI (admin) |
+| `GET /models` | GET | Lista modelos do endpoint OmniRoute dinamicamente |
+| `GET /profiles` | GET | Lista os 7 perfis builtin |
 
-Esses arquivos nao fazem mais parte do versionamento.
+---
 
-## Limitacoes conhecidas
+## Perfis dos 4 NPCs Padrão (feature-diego)
 
-- `ConnectionManager` em memoria: continua single-worker
-- `main.py` segue concentrando muita responsabilidade
-- paths de storage dependem do backend ser iniciado a partir de `backend/`
-- `webhook_manager` e `session_store` compartilham o mesmo SQLite local
+```python
+_default_profiles = ["claude-kiro", "kimi-thinking", "kimi-groq", "claude-haiku"]
+# João → claude-kiro  | Maria → kimi-thinking
+# Zeca → kimi-groq    | Elly  → claude-haiku
+```
 
-## Direcao recomendada
+---
 
-A proxima modularizacao continua sendo:
+## Resetar Estado Local
 
-- separar API de simulacao
-- tirar estado global de `main.py`
-- preparar um manager de broadcast desacoplado do processo local
+```bash
+find backend/data -type f -delete
+find backend/logs -type f -delete
+find backend -maxdepth 1 \( -name 'hall_of_fame.json' -o -name 'world_settings.json' \) -delete
+```
 
-Esses passos estao detalhados em `docs/TARGET_ARCHITECTURE.md`.
+---
+
+## Rate Limiting (T18)
+
+| Endpoint | Limite |
+|----------|--------|
+| `POST /agents/register` | 10 req/min |
+| `POST /tournaments` | 5 req/min |
+| `POST /webhooks/register` | 20 req/hora |
+
+---
+
+## Dependências
+
+```
+fastapi, uvicorn    # Framework web + ASGI
+pydantic            # Validação de schemas
+python-dotenv       # Config por env
+openai              # Adapter OpenAI-compatible (OmniRoute)
+google-genai        # Planejado p/ adapter Gemini nativo (ainda não usado no backend)
+slowapi             # Rate limiting
+httpx               # HTTP async (webhooks + /models proxy)
+pytest              # Testes unitários (33 casos)
+```

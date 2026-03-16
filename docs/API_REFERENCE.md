@@ -1,277 +1,254 @@
-# API Reference
+# API Reference — BBBia v0.6
 
-Base local padrao:
+> Base URL: `http://localhost:8001`
+> Admin endpoints requerem header `X-Admin-Token: <ADMIN_TOKEN>`
 
-- REST: `http://localhost:8001`
-- WebSocket: `ws://localhost:8001/ws`
-- Frontend servido pelo backend: `http://localhost:8001/frontend/...`
+---
 
-## Autenticacao admin
-
-Endpoints administrativos exigem header:
-
-```http
-X-Admin-Token: <ADMIN_TOKEN>
-```
-
-## Status e operacao
+## Status
 
 ### `GET /`
-
-Retorna estado resumido da engine.
-
-Exemplo:
+Retorna status do servidor e ticks atuais.
 
 ```json
-{
-  "status": "World engine is running",
-  "ticks": 12,
-  "session_id": "f0b7...",
-  "agents": 4
-}
+{ "status": "World engine is running", "ticks": 42, "session_id": "abc...", "agents": 4 }
 ```
 
 ### `GET /system/info`
+Informações detalhadas do sistema (versão, módulos, status).
 
-Resumo dos modulos ativos, sessao corrente e contadores operacionais.
+---
 
-### `GET /rate-limit/status`
-
-Mostra se `slowapi` esta ativo e quais limites sao aplicados.
-
-### `POST /reset?player_count=4`  `admin`
-
-Fecha a sessao corrente, salva memoria persistente dos agentes com `owner_id`, abre nova sessao e reseta a ilha.
-
-### `POST /settings/ai_interval?interval=2`  `admin`
-
-Atualiza o intervalo de pensamento da IA no mundo atual.
-
-## Frontend estatico
-
-### `GET /frontend/index.html`
-### `GET /frontend/dashboard.html`
-### `GET /frontend/models.html`
-
-Paginas servidas pelo FastAPI. O fluxo suportado desta branch usa essas rotas e nao `file://`.
-
-## Perfis
+## Perfis de IA
 
 ### `GET /profiles`
-
-Lista os 8 perfis builtin.
-
-Exemplo de item retornado:
+Lista todos os 7 perfis builtin.
 
 ```json
 {
-  "profile_id": "claude-kiro",
-  "provider": "omnirouter",
-  "model": "kr/claude-sonnet-4.5",
-  "cooldown_ticks": 4,
-  "token_budget": 15000,
-  "max_tokens": 400
+  "profiles": [
+    {
+      "profile_id": "claude-kiro",
+      "provider": "omnirouter",
+      "model": "kr/claude-sonnet-4.5",
+      "cooldown_ticks": 4,
+      "token_budget": 15000,
+      "max_tokens": 400
+    }
+  ]
 }
 ```
+
+**Perfis disponíveis:** `claude-kiro`, `claude-haiku`, `kimi-thinking`, `qwen-coder`, `kimi-groq`, `gemini-flash`, `llama-groq`
+
+---
+
+## Configuração de IA (preset de catálogo da UI)
+
+> Estes endpoints salvam apenas o preset auxiliar da UI. O runtime de decisão dos agentes usa sempre o `profile_id` atribuído a cada agente.
+
+### `GET /settings/ai`
+Retorna o preset salvo de provider/modelo/URL.
+
+```json
+{
+  "scope": "catalog_default",
+  "note": "Perfis por agente são a fonte de verdade.",
+  "ai_provider": "omnirouter",
+  "ai_model": "kr/claude-sonnet-4.5",
+  "omniroute_url": "http://192.168.0.15:20128/v1"
+}
+```
+
+### `POST /settings/ai` *(admin)*
+Salva preset de catálogo.
+
+```json
+{
+  "ai_provider": "omnirouter",
+  "ai_model": "kr/claude-sonnet-4.5",
+  "omniroute_url": "http://192.168.0.15:20128/v1"
+}
+```
+
+### `GET /models?provider=omnirouter&url=<base_url>`
+Lista modelos dinamicamente do endpoint OmniRoute (ou qualquer endpoint OpenAI-compatible).
+Retorna perfis builtin + modelos curados + modelos dinâmicos do endpoint.
+
+```json
+{
+  "scope": "catalog",
+  "provider": "omnirouter",
+  "base_url": "http://192.168.0.15:20128/v1",
+  "models": [
+    { "id": "kr/claude-sonnet-4.5", "name": "claude-kiro (kr/claude-sonnet-4.5)", "source": "builtin_profile" }
+  ]
+}
+```
+
+---
 
 ## Agentes
 
 ### `POST /agents/register`
-
-Registra um agente externo e o insere imediatamente na ilha.
-
-Body:
+Registra um agente customizado na ilha. Rate limit: 10/min.
 
 ```json
 {
-  "owner_id": "meu-owner",
-  "owner_name": "Opcional",
-  "agent_name": "Scout",
-  "persona": "Estrategico e adaptavel",
+  "owner_id": "meu-id",
+  "owner_name": "Meu Nome",
+  "agent_name": "MeuBot",
+  "persona": "Estratégico e adaptável",
   "profile_id": "claude-kiro"
 }
 ```
 
-Notas:
-
-- `profile_id` agora defaulta para `claude-kiro`
-- se `profile_id` nao existir, o backend retorna `400`
-
-### `GET /agents/{agent_id}/state`
-
-Retorna estado resumido do agente:
-
-- vida
-- posicao
-- budget de tokens
-- benchmark
-- `profile_id`
-- memoria recente
-
-### `GET /agent/{agent_id}/context`
-
-Retorna o contexto perceptivo do agente no mundo.
-
-### `POST /agent/{agent_id}/action`
-
-Envia uma acao manual.
-
-Body:
-
+Resposta:
 ```json
 {
-  "thought": "Vou esperar",
-  "action": "wait",
-  "speak": "Segurando posicao",
-  "target_name": "",
-  "params": {}
+  "agent_id": "agent_meu-id_1710000000",
+  "message": "MeuBot entrou na ilha!",
+  "profile": "claude-kiro",
+  "model": "kr/claude-sonnet-4.5",
+  "token_budget": 15000
 }
 ```
 
-### `DELETE /agent/{agent_id}`  `admin`
+### `GET /agents/{agent_id}/state`
+Estado atual + benchmark + memória recente do agente.
 
-Remove um agente do mundo atual.
+### `DELETE /agent/{agent_id}` *(admin)*
+Remove agente da ilha.
 
-### `POST /join`
+---
 
-Endpoint legado para entrada simplificada de agente remoto.
-
-## Sessoes, replay e exportacao
+## Sessões, Scoreboard e Replay
 
 ### `GET /sessions?limit=20`
-
-Lista sessoes salvas no SQLite.
+Histórico de sessões do SQLite.
 
 ### `GET /sessions/{session_id}/replay`
-
-Retorna todos os frames de replay da sessao.
+Todos os frames de replay de uma sessão (snapshots a cada 5 ticks).
 
 ### `GET /sessions/{session_id}/replay/frame/{tick}`
-
-Retorna um frame especifico do replay.
+Frame específico de replay.
 
 ### `GET /sessions/{session_id}/export?format=json|csv`
-
-Exporta os frames de replay da sessao.
+Exporta frames de replay.
 
 ### `GET /sessions/{session_id}/decisions/export?format=json|csv`
-
-Exporta o decision log da sessao.
-
-## Scoreboard
+Exporta decision log NDJSON.
 
 ### `GET /world/scoreboard?limit=50`
-
-Retorna placar historico agregado.
+Scoreboard global multi-sessão.
 
 ### `GET /world/scoreboard/export?format=json|csv`
+Exporta scoreboard.
 
-Exporta o scoreboard.
+---
+
+## Controle de Jogo
+
+### `POST /reset` *(admin)*
+Reset completo após salvar memórias persistentes da sessão atual.
+Query: `?player_count=4`
+
+### `POST /settings/ai_interval` *(admin)*
+Altera intervalo de ticks entre decisões de IA.
+Query: `?interval=5`
+
+---
 
 ## Torneios
 
-### `POST /tournaments`  `admin`
-
-Body:
+### `POST /tournaments` *(admin)*  Rate limit: 5/min
+Cria um torneio.
 
 ```json
 {
-  "name": "Torneio da tarde",
+  "name": "Torneio Alpha",
   "max_agents": 8,
   "duration_ticks": 500,
-  "allowed_profiles": [],
+  "allowed_profiles": ["claude-kiro", "llama-groq"],
   "reset_on_finish": true
 }
 ```
 
+### `POST /tournaments/{id}/join`
+Registra agente em torneio (mesma estrutura de `/agents/register`).
+
+### `POST /tournaments/{id}/start` *(admin)*
+Inicia o torneio.
+
 ### `GET /tournaments`
+Lista todos os torneios.
 
-Lista torneios em memoria.
+### `GET /tournaments/{id}/status`
+Status detalhado com progresso.
 
-### `POST /tournaments/{t_id}/join`
+### `GET /tournaments/{id}/leaderboard`
+Leaderboard ao vivo ou final.
 
-Registra agente no torneio usando o mesmo payload de `POST /agents/register`.
-
-### `POST /tournaments/{t_id}/start`  `admin`
-
-Ativa o torneio e define `end_tick`.
-
-### `GET /tournaments/{tournament_id}/status`
-
-Retorna progresso, ticks restantes e metadados do torneio.
-
-### `GET /tournaments/{tournament_id}/leaderboard`
-
-Retorna leaderboard ao vivo ou final.
-
-## Memoria persistente
-
-### `GET /memories`
-### `GET /memories?owner_id=<owner>`
-
-Lista memorias persistidas. O filtro por `owner_id` e opcional.
-
-### `POST /memories/save/{agent_id}`
-
-Forca o salvamento da memoria do agente atual.
-
-Restricao:
-
-- o agente precisa ter `owner_id`
-
-### `DELETE /memories/{owner_id}/{agent_name}`  `admin`
-
-Remove a memoria persistida desse agente.
+---
 
 ## Webhooks
 
-### `POST /webhooks/register`
-
-Body:
+### `POST /webhooks/register`  Rate limit: 20/hora
+Registra um webhook para eventos críticos.
 
 ```json
 {
-  "owner_id": "meu-owner",
-  "url": "https://meuservidor.com/hook",
-  "events": ["death", "tournament_end"],
-  "secret": "opcional"
+  "url": "https://meu-servidor.com/webhook",
+  "events": ["death", "zombie", "tournament_end", "agent_registered"],
+  "secret": "minha-chave-hmac"
 }
 ```
 
-Eventos aceitos pelo backend hoje:
+### `GET /webhooks/{owner_id}`  (admin)
+Lista webhooks registrados para um `owner_id` específico.
 
-- `death`
-- `win`
-- `zombie`
-- `tournament_end`
-- `agent_registered`
-- `all`
+### `DELETE /webhooks/{webhook_id}`  (admin)
+Remove um webhook registrado. Requer o `owner_id` na query:
+`DELETE /webhooks/{webhook_id}?owner_id=<OWNER_ID>`.
 
-### `GET /webhooks/{owner_id}`
+### `POST /webhooks/test/{owner_id}`  (admin)
+Dispara um evento de teste para os webhooks associados ao `owner_id` informado.
 
-Lista os webhooks do owner.
+---
 
-### `DELETE /webhooks/{webhook_id}?owner_id=<owner>`
+## Sistema
 
-Remove um webhook. O `owner_id` e obrigatorio para validacao.
+### `GET /rate-limit/status`
+Status do rate limiting (slowapi).
 
-### `POST /webhooks/test/{owner_id}`  `admin`
+### `GET /memories`
+Lista agentes com memória persistente.
 
-Dispara um evento de teste para os hooks desse owner.
+---
+
+## Remote Agent API (legada)
+
+### `POST /join`
+Agente remoto entra na ilha (requer `agent_id` em `AUTHORIZED_IDS`).
+
+### `GET /agent/{agent_id}/context`
+Contexto do mundo para o agente remoto.
+
+### `POST /agent/{agent_id}/action`
+Submete ação manual para o agente remoto.
+
+---
 
 ## WebSocket
 
-### `WS /ws`
+### `ws://localhost:8001/ws`
 
-Mensagens principais:
+Mensagens recebidas:
 
-- `init`: estado inicial completo
-- `update`: estado atualizado + eventos opcionais
-- `reset`: snapshot logo apos reset manual ou automatico
+| type | Descrição |
+|------|-----------|
+| `init` | Estado completo ao conectar |
+| `update` | Estado + eventos a cada tick |
+| `reset` | Estado após reset |
 
-## Erros comuns
-
-- `401 Unauthorized`: faltou `X-Admin-Token` em endpoint admin
-- `404`: sessao, frame, agente, memoria ou torneio inexistente
-- `409`: capacidade maxima atingida ou torneio ja iniciado
-- `503`: `TournamentRunner` indisponivel
+Payload `data` inclui: `agents`, `tiles`, `ticks`, `is_night`, `ai_provider`, `ai_model`, `omniroute_url`, `day_cycle`, `player_count`.

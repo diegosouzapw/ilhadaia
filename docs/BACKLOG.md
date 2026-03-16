@@ -1,69 +1,62 @@
-# Backlog
+# Backlog — BBBia
 
-Este backlog foi reduzido para o que realmente continua em aberto depois desta branch. Nao inclui mais artefatos de runtime nem divergencias entre docs e codigo, porque esses pontos foram saneados aqui.
+---
 
-## Prioridade alta
+## Pendências Técnicas Reais
 
-### 1. Broadcast multi-worker
+### T17 — Multi-worker com Redis pub/sub
+- **Status:** Backlog
+- **Por quê:** A arquitetura atual usa um único worker FastAPI + asyncio com WebSocket broadcast local. Para escalar horizontalmente (múltiplos workers ou pods), o broadcast precisa de um pub/sub externo (Redis).
+- **Impacto:** Sem isso, apenas 1 worker pode ser executado por vez.
 
-Problema atual:
+### T25 — Persistência de Memória em Sessões Longas
+- **Status:** Backlog
+- **Por quê:** `MemoryStore` serializa `AgentMemory` por `owner_id`. Em sessões muito longas, episódios antigos nunca são purgados do SQLite.
+- **Sugestão:** Implementar TTL ou limite de episódios no `memory_store`.
 
-- o `ConnectionManager` ainda vive em memoria dentro de um unico processo
-- com mais de um worker, cada processo teria sua propria lista de conexoes
+### Autenticação de Providers no OmniRoute
+- **Status:** Monitoramento
+- **Problema:** Providers que exigem OAuth (como `gc/` via Gemini CLI) podem retornar 403 por rate limit de conta. O runtime não faz retry inteligente por provider.
+- **Sugestão:** Implementar fallback de provider no `Thinker` quando o adapter retornar 4xx.
 
-Caminho sugerido:
+### Drag do Benchmark HUD — Persistência em Mobile
+- **Status:** Backlog
+- **Problema:** A posição do HUD é salva no `localStorage` por desktop. Em dispositivos touch, o HUD pode sair da área visível.
+- **Sugestão:** Limitar `left`/`top` ao viewport ao restaurar posição.
 
-- introduzir um barramento de eventos entre processos
-- Redis pub/sub continua sendo a opcao mais simples
-- separar transporte WebSocket de geracao de eventos do mundo
+---
 
-## Prioridade media
+## Ideias Futuras
 
-### 2. Modularizar `backend/main.py`
+- **Leaderboard público** — endpoint open para observadores externos votarem/acompanharem
+- **Multi-ilha** — múltiplas instâncias `World` em sessões paralelas
+- **Agente treinável** — fine-tuning local com decisões bem-sucedidas
+- **Plugin de provider** — suporte a providers adicionais via config sem alterar código
+- **Dashboard mobile** — layout responsivo para `dashboard.html` e `models.html`
 
-Problema atual:
+---
 
-- `main.py` concentra lifespan, rotas, loop do mundo, exportacoes e webhooks
+## Itens Implementados (removidos do backlog)
 
-Caminho sugerido:
-
-- mover rotas para modulos dedicados
-- extrair `world_loop()` e orchestration para modulos independentes
-- reduzir estado global compartilhado
-
-### 3. Tornar storage independente do diretorio de execucao
-
-Problema atual:
-
-- os paths de `data/` e `logs/` funcionam como esperado quando o backend sobe a partir de `backend/`
-
-Caminho sugerido:
-
-- resolver paths a partir de `__file__` ou configuracao explicita
-- permitir boot a partir da raiz sem ambiguidade de arquivos gerados
-
-## Prioridade baixa
-
-### 4. Melhorar a estrategia de smoke test
-
-O projeto ja tem uma suite util de backend, mas ainda falta uma verificacao integrada leve para:
-
-- boot do FastAPI
-- carga das tres paginas em `/frontend`
-- conexao WebSocket
-- criacao de sessao limpa em ambiente zerado
-
-### 5. Evoluir a observabilidade
-
-Possiveis ganhos:
-
-- metricas Prometheus
-- tracing de chamadas a providers
-- painel de saude para rate limiting e webhooks
-
-## Itens explicitamente resolvidos nesta branch
-
-- frontend servido pelo backend em `/frontend/*`
-- runtime state fora do versionamento
-- tela `models.html` integrada ao catalogo de perfis do backend
-- default tecnico e operacional migrado para `claude-kiro`
+| Task | Implementação |
+|------|--------------|
+| T01-T09 | Motor base (grid, vitals, inventário, ciclo dia/noite, chat) |
+| T10 | AgentMemory 4 camadas |
+| T11 | ActionDecision Pydantic |
+| T12 | OmniRoute via OpenAICompatibleAdapter |
+| T13 | Replay store NDJSON |
+| T14 | `/agents/register` com perfis |
+| T15 | Sistema de torneios (join/start/leaderboard) |
+| T16 | Benchmark HUD ao vivo + drag-and-drop + colapso |
+| T18 | Rate limiting via slowapi |
+| T19 | Export CSV/JSON de sessões/scoreboard |
+| T20 | TournamentRunner automático |
+| T21 | Busca episódica por relevância (TF-IDF) |
+| T22 | MemoryStore SQLite |
+| T23 | Frontend `models.html` (gerenciador de perfis) |
+| T24 | WebhookManager com HMAC |
+| T25 | Nav global nas 3 telas |
+| T26 | Sidebar da ilha (atalhos, replay, timeline integrados) |
+| T27 | `/settings/ai` + `/models` — catálogo dinâmico de IA |
+| T28 | Dropdown de perfis dinâmico no `models.html` |
+| T29 | `.gitignore` corrigido — exclui .db, logs, replays, .env |
