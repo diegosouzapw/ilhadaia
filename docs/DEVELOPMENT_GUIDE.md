@@ -38,7 +38,9 @@ ALLOWED_ORIGINS=*
 GEMINI_API_KEY=sua_chave_gemini_aqui
 ```
 
-**Aliases aceitos:** `OMNIROUTE_URL`, `OPENAI_BASE_URL` → todos resolvem para `OMNIROUTER_URL`.
+**Aliases aceitos:**
+- URL: `OMNIROUTER_URL`, `OMNIROUTE_URL`, `OPENAI_BASE_URL` → todos resolvem para `OMNIROUTER_URL`.
+- API key: `OMNIROUTER_API_KEY`, `OMNIROUTE_API_KEY`, `OPENAI_API_KEY` → todos resolvem para `OMNIROUTER_API_KEY`.
 
 ---
 
