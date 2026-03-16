@@ -53,6 +53,8 @@ let chatHistory = JSON.parse(localStorage.getItem('bbb_chat_history') || '[]');
 let chatFilter = "all";
 let globalVolume = parseFloat(localStorage.getItem('bbb_volume') || '0.5');
 let currentDayCycle = 0; // 0-119, updated from server
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
 
 // Day/Night color targets
 const DAY_SKY = new THREE.Color(0x87CEEB);
@@ -67,16 +69,18 @@ document.getElementById('volume-slider').value = globalVolume;
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 // --- Configuração de URLs Dinâmicas ---
-// Se estiver rodando localmente (localhost, 127.0.0.1 ou via arquivo direto), aponta para o localhost:8000
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '';
+// Arquivo local (file://) usa 8001. Frontend servido em :3000 usa backend em :8000.
+const isFileProtocol = window.location.protocol === 'file:';
+const backendPortOverride =
+    new URLSearchParams(window.location.search).get('backend_port') ||
+    localStorage.getItem('bbb_backend_port');
+const BACKEND_PORT = backendPortOverride
+    ? String(backendPortOverride)
+    : (isFileProtocol ? '8001' : (window.location.port === '3000' ? '8000' : (window.location.port || '8000')));
+const BACKEND_HOST = window.location.hostname || 'localhost';
 
-const API_BASE_URL = isLocal 
-    ? 'http://localhost:8000' 
-    : `${window.location.protocol}//${window.location.host}/api`;
-
-const WS_URL = isLocal
-    ? 'ws://localhost:8000/ws'
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+const API_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+const WS_URL = `ws://${BACKEND_HOST}:${BACKEND_PORT}/ws`;
 
 // Token de administrador apenas em memória (não persistido para segurança)
 let adminToken = 'dev_token_123';
@@ -103,50 +107,51 @@ const settingsToggle = document.getElementById('settings-toggle');
 const settingsModal = document.getElementById('settings-modal');
 const omniFields = document.getElementById('omni-fields');
 
+function normalizeProvider(provider) {
+    return 'omnirouter';
+}
+
 async function fetchAISettings() {
     try {
         const response = await fetch(`${API_BASE_URL}/settings/ai`);
         const data = await response.json();
-        
-        document.getElementById('ai-provider').value = data.ai_provider;
-        document.getElementById('omniroute-url').value = data.omniroute_url;
-        document.getElementById('admin-token').value = ""; // Security: don't pre-fill token
-        
-        // Update current config display (inside modal)
-        updateHeaderInfo(data.ai_provider, data.ai_model);
-        
-        // Fetch models and THEN set the value
-        await fetchModels(data.ai_provider, data.ai_model);
-        
-        // Toggle fields WITHOUT re-fetching models (to preserve selectedModelId)
-        toggleOmniFields(data.ai_provider, true);
+
+        const provider = normalizeProvider(data.ai_provider);
+        document.getElementById('ai-provider').value = provider;
+        document.getElementById('omniroute-url').value = data.omniroute_url || '';
+        document.getElementById('admin-token').value = '';
+
+        updateHeaderInfo(provider, data.ai_model);
+        await fetchModels(provider, data.ai_model);
+        toggleOmniFields(provider, true);
     } catch (e) {
         console.error("Failed to fetch AI settings", e);
     }
 }
 
 async function fetchModels(provider, selectedModelId = null) {
+    const normalizedProvider = normalizeProvider(provider);
     const modelSelector = document.getElementById('ai-model');
     const urlInput = document.getElementById('omniroute-url');
     if (!modelSelector) return;
-    
+
     let urlParam = "";
-    if (provider === 'omniroute' && urlInput && urlInput.value) {
+    if (normalizedProvider === 'omnirouter' && urlInput && urlInput.value) {
         urlParam = `&url=${encodeURIComponent(urlInput.value)}`;
     }
-    
+
     try {
-        const response = await fetch(`${API_BASE_URL}/models?provider=${provider}${urlParam}`);
+        const response = await fetch(`${API_BASE_URL}/models?provider=${normalizedProvider}${urlParam}`);
         const data = await response.json();
-        
-        console.log(`Fetched ${data.models ? data.models.length : 0} models for ${provider}`);
-        
+
+        console.log(`Fetched ${data.models ? data.models.length : 0} models for ${normalizedProvider}`);
+
         modelSelector.innerHTML = "";
         if (data.models && data.models.length > 0) {
-            data.models.forEach((m, index) => {
+            data.models.forEach((m) => {
                 const opt = document.createElement('option');
                 opt.value = m.id;
-                opt.innerText = `${index + 1}. ${m.name}`;
+                opt.innerText = m.name;
                 if (selectedModelId && m.id === selectedModelId) opt.selected = true;
                 modelSelector.appendChild(opt);
             });
@@ -163,16 +168,17 @@ async function fetchModels(provider, selectedModelId = null) {
 }
 
 function toggleOmniFields(provider, skipFetch = false) {
-    omniFields.style.display = provider === 'omniroute' ? 'block' : 'none';
+    const normalizedProvider = normalizeProvider(provider);
+    omniFields.style.display = normalizedProvider === 'omnirouter' ? 'block' : 'none';
     if (!skipFetch) {
-        fetchModels(provider);
+        fetchModels(normalizedProvider);
     }
 }
 
 function updateHeaderInfo(provider, model) {
     const pEl = document.getElementById('display-provider');
     const mEl = document.getElementById('display-model');
-    if (pEl) pEl.innerText = provider.toUpperCase();
+    if (pEl) pEl.innerText = 'OMNIROUTER / OPENAI-COMPATIBLE';
     if (mEl) mEl.innerText = model;
 }
 
@@ -180,8 +186,8 @@ function updateHeaderInfo(provider, model) {
 const urlInput = document.getElementById('omniroute-url');
 if (urlInput) {
     urlInput.oninput = () => {
-        const provider = document.getElementById('ai-provider').value;
-        if (provider === 'omniroute') {
+        const provider = normalizeProvider(document.getElementById('ai-provider').value);
+        if (provider === 'omnirouter') {
             fetchModels(provider);
         }
     };
@@ -218,10 +224,10 @@ if (settingsToggle) {
 
 async function saveSettings() {
     clearSettingsMessage();
-    const ai_provider = document.getElementById('ai-provider').value;
+    const ai_provider = normalizeProvider(document.getElementById('ai-provider').value);
     const ai_model = document.getElementById('ai-model').value;
     const omniroute_url = document.getElementById('omniroute-url').value;
-    const new_token = document.getElementById('admin-token').value;
+    const new_token = document.getElementById('admin-token').value.trim() || adminToken;
 
     if (!new_token) {
         showSettingsMessage("O TOKEN É OBRIGATÓRIO!", "error");
@@ -231,17 +237,18 @@ async function saveSettings() {
     try {
         const response = await fetch(`${API_BASE_URL}/settings/ai`, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
-                'X-Admin-Token': new_token 
+                'X-Admin-Token': new_token
             },
             body: JSON.stringify({ ai_provider, ai_model, omniroute_url })
         });
         if (response.ok) {
+            const data = await response.json();
             console.log("AI Settings saved successfully");
-            setAdminToken(new_token); // Update memory token for this session
-            updateHeaderInfo(ai_provider, ai_model); // Update header display
-            showSettingsMessage("CONFIGURAÇÃO SALVA!", "success");
+            setAdminToken(new_token);
+            updateHeaderInfo(data.ai_provider, data.ai_model);
+            showSettingsMessage("PRESET SALVO!", "success");
             setTimeout(closeSettings, 1000);
         } else {
             console.error("Save failed:", response.status);
@@ -677,6 +684,15 @@ function connectWebSocket() {
             
             if (message.events) {
                 handleEvents(message.events);
+                // T16: Timeline de eventos
+                if (typeof addEventToTimeline === 'function') {
+                    addEventToTimeline(message.events, message.data?.ticks);
+                }
+            }
+
+            // T16: HUD de Benchmark — atualiza com agentes do estado
+            if (typeof updateBenchmarkHUD === 'function' && message.data?.agents) {
+                updateBenchmarkHUD(message.data.agents, message.data?.session_id);
             }
         }
     };
@@ -850,6 +866,9 @@ function updateWorld(data) {
             
             if (mesh) {
                 mesh.position.set(pos.x, 0, pos.z);
+                mesh.userData = mesh.userData || {};
+                mesh.userData.entityId = id;
+                mesh.userData.entityType = entity.type;
                 scene.add(mesh);
                 meshes[id] = mesh;
             }
@@ -987,6 +1006,45 @@ function updateWorld(data) {
         }
     }
     invContainer.innerHTML = invHTML;
+}
+
+function findAgentRoot(object3d) {
+    let current = object3d;
+    while (current) {
+        if (current.userData && current.userData.entityType === 'agent') {
+            return current;
+        }
+        current = current.parent;
+    }
+    return null;
+}
+
+function handleWorldClick(event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+
+    const hits = raycaster.intersectObjects(scene.children, true);
+    for (const hit of hits) {
+        const agentRoot = findAgentRoot(hit.object);
+        if (!agentRoot) continue;
+        const agentId = agentRoot.userData?.entityId;
+        if (agentId && typeof showAgentModal === 'function') {
+            showAgentModal(agentId);
+        }
+        break;
+    }
+}
+
+// T13/T16: renderer de replay chamado por benchmark.js
+function renderWorldStateReplay(state, tickOverride) {
+    if (!state) return;
+    const replayState = { ...state };
+    if (tickOverride !== undefined && tickOverride !== null) {
+        replayState.ticks = tickOverride;
+    }
+    updateWorld(replayState);
 }
 
 // Chat Persistence Helpers
@@ -1273,3 +1331,4 @@ window.toggleCameraMode = function() {
 };
 
 animate();
+renderer.domElement.addEventListener('click', handleWorldClick);
