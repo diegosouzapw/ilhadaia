@@ -48,7 +48,6 @@
 | T14 | `/agents/register` com perfis |
 | T15 | Sistema de torneios (join/start/leaderboard) |
 | T16 | Benchmark HUD ao vivo + drag-and-drop + colapso |
-| T17 | Backlog — Redis pub/sub |
 | T18 | Rate limiting via slowapi |
 | T19 | Export CSV/JSON de sessões/scoreboard |
 | T20 | TournamentRunner automático |
