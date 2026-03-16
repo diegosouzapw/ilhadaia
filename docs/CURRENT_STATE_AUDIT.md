@@ -17,7 +17,7 @@
 | `agent.py` | ✅ | Vitals, budget, 4 camadas de memória, profile_id |
 | `runtime/thinker.py` | ✅ | OpenAICompatibleAdapter, can_think(), logging |
 | `runtime/profiles.py` | ✅ | 7 perfis free-first via OmniRoute |
-| `runtime/adapters/openai_compat.py` | ✅ | Adapter único para qualquer endpoint OpenAI-compat |
+| `backend/runtime/adapters/openai_compatible.py` | ✅ | Adapter único para qualquer endpoint OpenAI-compat |
 | `runtime/memory.py` | ✅ | AgentMemory 4 camadas |
 | `runtime/relevance.py` | ✅ | TF-IDF + decaimento temporal |
 | `runtime/tournament_runner.py` | ✅ | Auto-finalização, leaderboard, webhook |
