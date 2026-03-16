@@ -78,13 +78,12 @@ const WS_URL = isLocal
     ? 'ws://localhost:8000/ws'
     : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
-// Tenta carregar o Admin Token do localStorage ou pede ao usuário se for necessário
-let adminToken = localStorage.getItem('bbb_admin_token') || 'dev_token_123';
+// Token de administrador apenas em memória (não persistido para segurança)
+let adminToken = 'dev_token_123';
 
 function setAdminToken(token) {
     adminToken = token;
-    localStorage.setItem('bbb_admin_token', token);
-    console.log("Admin Token atualizado.");
+    console.log("Admin Token atualizado na sessão.");
 }
 
 async function updateTickInterval(val) {
@@ -96,6 +95,165 @@ async function updateTickInterval(val) {
         console.log("AI Interval updated to:", val);
     } catch (e) {
         console.error("Failed to update AI interval", e);
+    }
+}
+
+// AI Settings Modal Logic
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsModal = document.getElementById('settings-modal');
+const omniFields = document.getElementById('omni-fields');
+
+async function fetchAISettings() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/settings/ai`);
+        const data = await response.json();
+        
+        document.getElementById('ai-provider').value = data.ai_provider;
+        document.getElementById('omniroute-url').value = data.omniroute_url;
+        document.getElementById('admin-token').value = ""; // Security: don't pre-fill token
+        
+        // Update current config display (inside modal)
+        updateHeaderInfo(data.ai_provider, data.ai_model);
+        
+        // Fetch models and THEN set the value
+        await fetchModels(data.ai_provider, data.ai_model);
+        
+        // Toggle fields WITHOUT re-fetching models (to preserve selectedModelId)
+        toggleOmniFields(data.ai_provider, true);
+    } catch (e) {
+        console.error("Failed to fetch AI settings", e);
+    }
+}
+
+async function fetchModels(provider, selectedModelId = null) {
+    const modelSelector = document.getElementById('ai-model');
+    const urlInput = document.getElementById('omniroute-url');
+    if (!modelSelector) return;
+    
+    let urlParam = "";
+    if (provider === 'omniroute' && urlInput && urlInput.value) {
+        urlParam = `&url=${encodeURIComponent(urlInput.value)}`;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/models?provider=${provider}${urlParam}`);
+        const data = await response.json();
+        
+        console.log(`Fetched ${data.models ? data.models.length : 0} models for ${provider}`);
+        
+        modelSelector.innerHTML = "";
+        if (data.models && data.models.length > 0) {
+            data.models.forEach((m, index) => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.innerText = `${index + 1}. ${m.name}`;
+                if (selectedModelId && m.id === selectedModelId) opt.selected = true;
+                modelSelector.appendChild(opt);
+            });
+        } else {
+            const opt = document.createElement('option');
+            opt.value = "default";
+            opt.innerText = "Padrão do Provedor";
+            modelSelector.appendChild(opt);
+        }
+    } catch (e) {
+        console.error("Failed to fetch models", e);
+        modelSelector.innerHTML = '<option value="default">Erro ao carregar modelos</option>';
+    }
+}
+
+function toggleOmniFields(provider, skipFetch = false) {
+    omniFields.style.display = provider === 'omniroute' ? 'block' : 'none';
+    if (!skipFetch) {
+        fetchModels(provider);
+    }
+}
+
+function updateHeaderInfo(provider, model) {
+    const pEl = document.getElementById('display-provider');
+    const mEl = document.getElementById('display-model');
+    if (pEl) pEl.innerText = provider.toUpperCase();
+    if (mEl) mEl.innerText = model;
+}
+
+// Add live update when URL changes
+const urlInput = document.getElementById('omniroute-url');
+if (urlInput) {
+    urlInput.oninput = () => {
+        const provider = document.getElementById('ai-provider').value;
+        if (provider === 'omniroute') {
+            fetchModels(provider);
+        }
+    };
+}
+
+function openSettings() {
+    clearSettingsMessage();
+    fetchAISettings();
+    settingsModal.style.display = 'flex';
+}
+
+function closeSettings() {
+    settingsModal.style.display = 'none';
+}
+
+function showSettingsMessage(text, type) {
+    const msgEl = document.getElementById('settings-message');
+    if (!msgEl) return;
+    msgEl.innerText = text;
+    msgEl.className = type; // 'error' or 'success'
+}
+
+function clearSettingsMessage() {
+    const msgEl = document.getElementById('settings-message');
+    if (msgEl) {
+        msgEl.innerText = "";
+        msgEl.className = "";
+    }
+}
+
+if (settingsToggle) {
+    settingsToggle.onclick = openSettings;
+}
+
+async function saveSettings() {
+    clearSettingsMessage();
+    const ai_provider = document.getElementById('ai-provider').value;
+    const ai_model = document.getElementById('ai-model').value;
+    const omniroute_url = document.getElementById('omniroute-url').value;
+    const new_token = document.getElementById('admin-token').value;
+
+    if (!new_token) {
+        showSettingsMessage("O TOKEN É OBRIGATÓRIO!", "error");
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/settings/ai`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-Admin-Token': new_token 
+            },
+            body: JSON.stringify({ ai_provider, ai_model, omniroute_url })
+        });
+        if (response.ok) {
+            console.log("AI Settings saved successfully");
+            setAdminToken(new_token); // Update memory token for this session
+            updateHeaderInfo(ai_provider, ai_model); // Update header display
+            showSettingsMessage("CONFIGURAÇÃO SALVA!", "success");
+            setTimeout(closeSettings, 1000);
+        } else {
+            console.error("Save failed:", response.status);
+            if (response.status === 401) {
+                showSettingsMessage("TOKEN INVÁLIDO!", "error");
+            } else {
+                showSettingsMessage("ERRO NO SERVIDOR!", "error");
+            }
+        }
+    } catch (e) {
+        console.error("Error saving AI settings", e);
+        showSettingsMessage("ERRO DE CONEXÃO!", "error");
     }
 }
 

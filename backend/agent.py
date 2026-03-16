@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import httpx
 from uuid import uuid4
 from dotenv import load_dotenv
 from google import genai
@@ -110,17 +111,22 @@ class Agent:
         if not self.is_alive or self.is_remote:
             return None
 
-        current_key = get_current_key()
-        if not self.client or not current_key:
-            # Fallback random movement if API not configured
+        # Determine which provider to use from context
+        ai_provider = context.get("ai_provider", "gemini")
+        omniroute_url = context.get("omniroute_url", "http://localhost:20128/v1/chat/completions")
+
+        current_key = os.getenv("GEMINI_API_KEY") if ai_provider == "gemini" else os.getenv("OMNIROUTE_API_KEY")
+
+        if ai_provider == "gemini" and (not self.client or not current_key):
              import random
              action = {
-                 "thought": "I don't have a brain API key, wandering randomly...",
+                 "agent_id": self.id,
+                 "name": self.name,
+                 "thought": "I don't have a Gemini API key, wandering randomly...",
                  "action": "move",
                  "dx": random.choice([-1, 0, 1]),
                  "dy": random.choice([-1, 0, 1])
              }
-             logger.debug(f"{self.name} generated fallback action: {action}")
              return action
 
         # Build prompt based on context
@@ -158,22 +164,28 @@ class Agent:
         """
         
         try:
-            # Make the API call
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    response_mime_type="application/json",
-                ),
-            )
-            text_response = response.text.strip()
+            if ai_provider == "gemini":
+                # Make the Gemini API call
+                response = self.client.models.generate_content(
+                    model=context.get("ai_model", "gemini-2.0-flash"),
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=self.system_instruction,
+                        response_mime_type="application/json",
+                    ),
+                )
+                text_response = response.text.strip()
+            else:
+                # Make OMNIROUTE API call
+                text_response = await self._call_omniroute(prompt, omniroute_url, current_key, context.get("ai_model", "gpt-4o"))
             
             # Clean up potential markdown formatting from the response
+            text_response = text_response.strip()
             if text_response.startswith("```json"):
                 text_response = text_response[7:]
             if text_response.endswith("```"):
                 text_response = text_response[:-3]
+            text_response = text_response.strip()
                 
             action_data = json.loads(text_response)
             
@@ -209,7 +221,7 @@ class Agent:
             return final_action
             
         except Exception as e:
-            logger.error(f"Error generating action for {self.name}: {e}\nResponse was: {response.text if 'response' in locals() else 'None'}")
+            logger.error(f"Error generating action for {self.name}: {e}")
             return {
                 "agent_id": self.id, 
                 "name": self.name, 
@@ -217,3 +229,24 @@ class Agent:
                 "thought": f"Erro de processamento: {str(e)}", 
                 "speak": "Minha cabeça está um pouco confusa agora... (Erro de IA)"
             }
+
+    async def _call_omniroute(self, prompt, url, api_key, model_name):
+        """Standard OpenAI-style call for OMNIROUTE."""
+        headers = {
+            "Authorization": f"Bearer {api_key if api_key else 'no-key'}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": self.system_instruction},
+                {"role": "user", "content": prompt}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]

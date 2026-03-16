@@ -23,7 +23,8 @@ Os personagens no jogo não seguem scripts fixos. Cada um possui uma personalida
 
 - **Frontend**: [Three.js](https://threejs.org/) (Motor 3D), Vanilla JavaScript, CSS3.
 - **Backend**: [FastAPI](https://fastapi.tiangolo.com/) (Python), WebSockets para comunicação em tempo real.
-- **Cérebro (IA)**: Google Gemini API via Google GenAI SDK.
+- **Cérebro (IA)**: Google Gemini API via Google GenAI SDK ou qualquer provedor compatível com OpenAI (via OMNIROUTE).
+- **Configurações Dinâmicas**: Menu de configurações (engrenagem) para trocar provedor, modelo e URL em tempo real.
 
 ## 📦 Como Instalar e Rodar
 

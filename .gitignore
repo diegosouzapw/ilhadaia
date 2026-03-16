@@ -35,6 +35,7 @@ backend/.env
 
 # Game State
 backend/hall_of_fame.json
+backend/world_settings.json
 
 # OS
 .DS_Store

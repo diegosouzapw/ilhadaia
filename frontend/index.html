@@ -11,7 +11,10 @@
 </head>
 <body>
     <div id="ui-layer">
-        <h1>👁️ BBBia: A Ilha da iA</h1>
+        <div id="header-container">
+            <h1>👁️ BBBia: A Ilha da iA</h1>
+            <button id="settings-toggle" title="Configurações AI">⚙️</button>
+        </div>
         <div id="time-display">
             <div class="time-line">
                 Dificuldade: Sobrevivência | Tick: <span id="tick-counter">0</span> | 
@@ -101,6 +104,41 @@
         </div>
     </div>
 
+    <div id="settings-modal" class="hidden-modal">
+        <div class="modal-content">
+            <h3>⚙️ Configurações de IA</h3>
+            <div id="current-config-box" style="background: rgba(255, 235, 59, 0.1); border: 1px solid #ffeb3b; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 10px; font-family: 'Press Start 2P', cursive; color: #ffeb3b; text-align: center;">
+                RODANDO: <span id="display-provider">-</span> | <span id="display-model">-</span>
+            </div>
+            <div class="settings-group">
+                <label for="admin-token">Admin Token (Segurança):</label>
+                <input type="password" id="admin-token" placeholder="Insira seu token">
+            </div>
+            <div class="settings-group">
+                <label for="ai-provider">Provedor:</label>
+                <select id="ai-provider" onchange="toggleOmniFields(this.value)">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="omniroute">OMNIROUTE (Local/OpenAI Style)</option>
+                </select>
+            </div>
+            <div class="settings-group">
+                <label for="ai-model">Modelo:</label>
+                <select id="ai-model"></select>
+            </div>
+            <div id="omni-fields" style="display: none;">
+                <div class="settings-group">
+                    <label for="omniroute-url">URL do Provedor:</label>
+                    <input type="text" id="omniroute-url" placeholder="http://localhost:20128/v1/chat/completions">
+                </div>
+            </div>
+            <div id="settings-message" style="margin-top: 10px; font-size: 12px; min-height: 1.5em; text-align: center; font-family: 'Press Start 2P', cursive;"></div>
+            <div class="modal-footer">
+                <button onclick="closeSettings()">Cancelar</button>
+                <button class="primary-btn" onclick="saveSettings()">Salvar Alterações</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="main.js"></script>
 </body>
 </html>
