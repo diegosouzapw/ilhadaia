@@ -1979,3 +1979,171 @@ async def warfare_territory():
         "faction_scores": world.warfare.faction_scores,
         "zone": zone,
     }
+
+# ═══════════════════════════════════════════════════════════════════════
+# F10+F17+F18+F19 — Economia, Crafting e Contratos
+# ═══════════════════════════════════════════════════════════════════════
+
+class EconomyStartRequest(BaseModel):
+    pass
+
+class CraftRequest(BaseModel):
+    agent_id: str
+    recipe: str
+
+class TradeRequest(BaseModel):
+    seller_id: str
+    buyer_id: str
+    item: str
+    price: float
+
+class MarketBuyRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+class MarketSellRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+class ContractPostRequest(BaseModel):
+    requester_id: str
+    item: str
+    qty: int
+    reward: float
+
+class ContractFulfillRequest(BaseModel):
+    agent_id: str
+    contract_id: int
+
+
+@app.post("/economy/start", dependencies=[Depends(verify_admin_token)])
+async def economy_start():
+    """F17: Inicializa a economia — dá moedas iniciais a todos os agentes. Requer X-Admin-Token."""
+    world.economy.start()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"💰 Economia iniciada! Cada agente recebeu {world.economy.coins} moedas"}]
+    })
+    return {"status": "started", "economy": world.economy.get_state()}
+
+
+@app.get("/economy/state")
+async def economy_state():
+    """F17-F19: Retorna estado completo da economia."""
+    return {"ticks": world.ticks, "economy": world.economy.get_state()}
+
+
+@app.get("/economy/recipes")
+async def economy_recipes():
+    """F10: Lista todas as receitas de crafting disponíveis."""
+    from runtime.economy_engine import RECIPES
+    return {"recipes": RECIPES}
+
+
+@app.post("/economy/craft")
+async def economy_craft(req: CraftRequest):
+    """F10: Agente crafta um item a partir de ingredientes no inventário."""
+    events = []
+    result = world.economy.craft(req.agent_id, req.recipe, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/economy/trade")
+async def economy_trade(req: TradeRequest):
+    """F17: Transfere item entre dois agentes por moedas."""
+    events = []
+    result = world.economy.trade(req.seller_id, req.buyer_id, req.item, req.price, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/economy/market")
+async def economy_market():
+    """F18: Retorna preços e estoques atuais do mercado central."""
+    return {
+        "prices": world.economy.market_prices,
+        "stock": world.economy.market_stock,
+        "tx_count": len(world.economy.market_tx_log),
+    }
+
+
+@app.post("/economy/market/buy")
+async def economy_market_buy(req: MarketBuyRequest):
+    """F18: Agente compra item do mercado central."""
+    events = []
+    result = world.economy.market_buy(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/economy/market/sell")
+async def economy_market_sell(req: MarketSellRequest):
+    """F18: Agente vende item ao mercado central."""
+    events = []
+    result = world.economy.market_sell(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/economy/contracts")
+async def economy_contracts():
+    """F19: Lista todos os contratos (abertos e cumpridos)."""
+    return {
+        "open": [c for c in world.economy.contracts if c["status"] == "open"],
+        "fulfilled": [c for c in world.economy.contracts if c["status"] == "fulfilled"],
+        "total": len(world.economy.contracts),
+    }
+
+
+@app.post("/economy/contracts")
+async def economy_post_contract(req: ContractPostRequest):
+    """F19: Publica um contrato de entrega de item."""
+    result = world.economy.post_contract(req.requester_id, req.item, req.qty, req.reward)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"📜 Novo contrato #{result['id']}: {req.qty}x {req.item} por {req.reward} moedas"}]
+    })
+    return result
+
+
+@app.post("/economy/contracts/fulfill")
+async def economy_fulfill_contract(req: ContractFulfillRequest):
+    """F19: Agente cumpre um contrato e recebe recompensa."""
+    events = []
+    result = world.economy.fulfill_contract(req.agent_id, req.contract_id, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/agents/{agent_id}/wallet")
+async def agent_wallet(agent_id: str):
+    """F17: Retorna saldo de moedas e reputação mercantil do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    return {
+        "agent_id": agent_id,
+        "name": agent.name,
+        "coins": world.economy.coins.get(agent_id, 0),
+        "trade_reputation": round(world.economy.trade_reputation.get(agent_id, 0), 2),
+    }

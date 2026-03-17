@@ -1475,3 +1475,190 @@ class TestWarfare:
         assert "warfare" in state
         assert state["warfare"] is not None
         assert "active" in state["warfare"]
+
+
+# ══════════════════════════════════════════════════════════════
+# F10+F17+F18+F19 — Economia, Crafting e Contratos
+# ══════════════════════════════════════════════════════════════
+
+class TestEconomiaCrafting:
+    def _make_econ_world(self):
+        from world import World
+        from agent import Agent
+        w = World(size=24)
+        for i, (name, x, y) in enumerate([("Alice", 3, 3), ("Bruno", 10, 10)]):
+            ag = Agent(name, "test", x, y)
+            w.add_agent(ag)
+        w.economy.start()
+        return w
+
+    # F10 — Crafting
+
+    def test_craft_axe_succeeds_with_ingredients(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = ["wood", "stone"]
+        events = []
+        result = w.economy.craft(agent.id, "axe", events)
+        assert "recipe" in result
+        assert result["recipe"] == "axe"
+        assert "wood" not in agent.inventory
+        assert "stone" not in agent.inventory
+        assert "axe" in agent.inventory
+
+    def test_craft_fails_without_ingredients(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = []
+        events = []
+        result = w.economy.craft(agent.id, "axe", events)
+        assert "error" in result
+
+    def test_craft_bandage_heals_agent(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = ["apple", "apple"]
+        agent.hp = 50
+        events = []
+        w.economy.craft(agent.id, "bandage", events)
+        assert agent.hp == 70  # +20 HP
+
+    def test_craft_invalid_recipe(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        events = []
+        result = w.economy.craft(agent.id, "nuke", events)
+        assert "error" in result
+
+    # F17 — Trade
+
+    def test_trade_transfers_item_and_coins(self):
+        w = self._make_econ_world()
+        seller = w.agents[0]
+        buyer = w.agents[1]
+        seller.inventory = ["apple"]
+        w.economy.coins[seller.id] = 5
+        w.economy.coins[buyer.id] = 10
+        events = []
+        result = w.economy.trade(seller.id, buyer.id, "apple", 3.0, events)
+        assert "apple" not in seller.inventory
+        assert "apple" in buyer.inventory
+        assert w.economy.coins[seller.id] == 8.0
+        assert w.economy.coins[buyer.id] == 7.0
+
+    def test_trade_fails_if_buyer_has_no_coins(self):
+        w = self._make_econ_world()
+        seller = w.agents[0]
+        buyer = w.agents[1]
+        seller.inventory = ["apple"]
+        w.economy.coins[buyer.id] = 0
+        events = []
+        result = w.economy.trade(seller.id, buyer.id, "apple", 5.0, events)
+        assert "error" in result
+
+    # F18 — Mercado Dinâmico
+
+    def test_market_buy_deducts_coins_and_gives_item(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        w.economy.coins[agent.id] = 20
+        events = []
+        result = w.economy.market_buy(agent.id, "apple", 2, events)
+        assert "item" in result
+        assert result["item"] == "apple"
+        assert agent.inventory.count("apple") == 2
+        assert w.economy.coins[agent.id] < 20
+
+    def test_market_sell_adds_coins(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = ["wood", "wood"]
+        initial_coins = w.economy.coins.get(agent.id, 0)
+        events = []
+        result = w.economy.market_sell(agent.id, "wood", 2, events)
+        assert "total" in result
+        assert w.economy.coins[agent.id] > initial_coins
+        assert agent.inventory.count("wood") == 0
+
+    def test_market_price_rises_when_stock_low(self):
+        w = self._make_econ_world()
+        w.economy.market_stock["apple"] = 1  # escassez
+        w.economy._recalc_prices()
+        base = 2.0  # MARKET_BASE_PRICES["apple"]
+        assert w.economy.market_prices["apple"] > base
+
+    def test_market_price_falls_when_stock_high(self):
+        w = self._make_econ_world()
+        w.economy.market_stock["apple"] = 100  # abundância
+        w.economy._recalc_prices()
+        assert w.economy.market_prices["apple"] < 2.0  # menor que base
+
+    # F19 — Contratos
+
+    def test_post_and_fulfill_contract(self):
+        w = self._make_econ_world()
+        requester = w.agents[0]
+        fulfiller = w.agents[1]
+        w.economy.coins[requester.id] = 20
+        fulfiller.inventory = ["apple", "apple"]
+        contract = w.economy.post_contract(requester.id, "apple", 2, 8.0)
+        assert contract["status"] == "open"
+        assert w.economy.coins[requester.id] == 12.0  # reservou 8
+        events = []
+        result = w.economy.fulfill_contract(fulfiller.id, contract["id"], events)
+        assert result["status"] == "fulfilled"
+        assert w.economy.coins[fulfiller.id] == 18.0  # 10 + 8
+        assert any("contract_fulfilled" in str(e) for e in events)
+
+    def test_fulfill_fails_without_items(self):
+        w = self._make_econ_world()
+        requester = w.agents[0]
+        fulfiller = w.agents[1]
+        w.economy.coins[requester.id] = 20
+        fulfiller.inventory = []
+        contract = w.economy.post_contract(requester.id, "apple", 2, 5.0)
+        events = []
+        result = w.economy.fulfill_contract(fulfiller.id, contract["id"], events)
+        assert "error" in result
+
+    def test_economy_state_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/economy/state")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "economy" in data
+            assert "market_prices" in data["economy"]
+
+    def test_economy_recipes_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/economy/recipes")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "axe" in data["recipes"]
+            assert "bandage" in data["recipes"]
+
+    def test_economy_market_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/economy/market")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "prices" in data
+            assert "stock" in data
+
+    def test_economy_contracts_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/economy/contracts")
+            assert resp.status_code == 200
+            assert "open" in resp.json()

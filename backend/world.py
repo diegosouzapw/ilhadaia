@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from runtime.gincana_engine import GincanaEngine
 from runtime.warfare_engine import WarfareEngine
+from runtime.economy_engine import EconomyEngine
 
 logger = logging.getLogger("BBB_IA")
 
@@ -91,6 +92,9 @@ class World:
 
         # ── F13-F16 — Modo Warfare ────────────────────────────────────────────
         self.warfare: WarfareEngine = WarfareEngine(self)
+
+        # ── F10+F17+F18+F19 — Economia ───────────────────────────────────────
+        self.economy: EconomyEngine = EconomyEngine(self)
 
         # Day/Night Cycle: 120 ticks total (70 day + 10 dusk + 30 night + 10 dawn)
         self.DAY_CYCLE = 120
@@ -978,6 +982,10 @@ class World:
         if self.game_mode == "warfare" and self.warfare.active:
             self.warfare.tick(events)
 
+        # ── F10+F17+F18+F19 — Economy Engine ───────────────────────────────
+        if self.economy.active:
+            self.economy.tick(events)
+
         return events
 
 
@@ -1573,6 +1581,8 @@ class World:
             "gincana": self.gincana.get_state() if self.game_mode == "gincana" else None,
             # F13-F16 — Warfare
             "warfare": self.warfare.get_state() if self.game_mode == "warfare" else None,
+            # F10+F17+F18+F19 — Economy (sempre exposto independente de modo)
+            "economy": self.economy.get_state(),
         }
 
     def reset_agents(self, AgentClass, player_count=None):
