@@ -731,3 +731,255 @@ class TestAdminConsole:
             resp = client.get("/admin/world/state")
             assert resp.status_code == 401
 
+
+# ══════════════════════════════════════════════════════════════
+# F06 — Temporadas e ELO
+# ══════════════════════════════════════════════════════════════
+
+class TestTemporadasELO:
+    def test_create_season(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_season("Temporada 1", game_mode="survival", description="Teste")
+            seasons = store.get_seasons()
+            assert any(s["id"] == sid for s in seasons)
+            s = next(s for s in seasons if s["id"] == sid)
+            assert s["name"] == "Temporada 1"
+            assert s["game_mode"] == "survival"
+            assert s["status"] == "active"
+            store.close()
+
+    def test_elo_default_for_new_profile(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_season("T1")
+            elo = store.get_elo(sid, "claude-kiro")
+            assert elo == store.ELO_DEFAULT
+            store.close()
+
+    def test_calc_elo_winner_gains_points(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            # Dois jogadores com ELO igual: vencedor deve ganhar, perdedor perder
+            elos = store._calc_elo([1000.0, 1000.0])
+            assert elos[0] > 1000.0, "Vencedor (placement 1) deve ganhar ELO"
+            assert elos[1] < 1000.0, "Perdedor (placement 2) deve perder ELO"
+            store.close()
+
+    def test_record_elo_session_persists(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            season_id = store.create_season("T1")
+            session_id = store.create_session({})
+            placements = [
+                {"profile_id": "claude-kiro", "score_total": 100.0},
+                {"profile_id": "claude-haiku", "score_total": 80.0},
+                {"profile_id": "gemini-flash", "score_total": 60.0},
+            ]
+            results = store.record_elo_session(season_id, session_id, placements)
+            assert len(results) == 3
+            # Vencedor deve ter delta positivo
+            assert results[0]["delta"] > 0, "1° deve ganhar ELO"
+            assert results[-1]["delta"] < 0, "Último deve perder ELO"
+            # Verificar persistência no leaderboard
+            lb = store.get_leaderboard_elo(season_id)
+            assert len(lb) == 3
+            # ELO do primeiro deve ser maior
+            elos_by_profile = {r["profile_id"]: r["elo"] for r in lb}
+            assert elos_by_profile["claude-kiro"] > elos_by_profile["gemini-flash"]
+            store.close()
+
+    def test_end_season(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_season("T-end")
+            store.end_season(sid)
+            seasons = store.get_seasons()
+            s = next(s for s in seasons if s["id"] == sid)
+            assert s["status"] == "completed"
+            assert s["ended_at"] is not None
+            store.close()
+
+    def test_seasons_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.get("/seasons")
+            assert resp.status_code == 200
+            assert "seasons" in resp.json()
+
+    def test_create_season_endpoint_requires_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/seasons", json={"name": "T-Unauth"})
+            assert resp.status_code == 401
+
+
+# ══════════════════════════════════════════════════════════════
+# F02 — Comparador A/B
+# ══════════════════════════════════════════════════════════════
+
+class TestComparadorAB:
+    def test_record_ab_result_winner_a(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_session({})
+            result = store.record_ab_result(
+                run_id="run1", session_id=sid,
+                profile_a="claude-kiro", profile_b="claude-haiku",
+                score_a=150.0, score_b=80.0,
+                ticks_a=200, ticks_b=200,
+                tokens_a=5000, tokens_b=3000,
+            )
+            assert result["winner"] == "A"
+            store.close()
+
+    def test_record_ab_result_tie(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_session({})
+            result = store.record_ab_result(
+                run_id="run2", session_id=sid,
+                profile_a="claude-kiro", profile_b="claude-haiku",
+                score_a=100.0, score_b=100.0,
+                ticks_a=200, ticks_b=200,
+                tokens_a=4000, tokens_b=4000,
+            )
+            assert result["winner"] == "tie"
+            store.close()
+
+    def test_get_ab_summary_filters_by_profile(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_session({})
+            store.record_ab_result("r1", sid, "claude-kiro", "claude-haiku", 120, 80, 200, 200, 5000, 3000)
+            store.record_ab_result("r2", sid, "gemini-flash", "kimi-groq", 90, 110, 200, 200, 4000, 5000)
+            results = store.get_ab_summary(profile_a="claude-kiro")
+            assert len(results) == 1  # Só r1 tem claude-kiro
+            assert results[0]["profile_a"] == "claude-kiro"
+            store.close()
+
+    def test_get_ab_stats_aggregated(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_session({})
+            for i in range(3):
+                store.record_ab_result(f"r{i}", sid, "claude-kiro", "claude-haiku",
+                                       100 + i * 10, 80.0, 200, 200, 5000, 3000)
+            stats = store.get_ab_stats()
+            assert len(stats) >= 1
+            row = next(r for r in stats if r["profile_a"] == "claude-kiro")
+            assert row["total"] == 3
+            assert row["wins_a"] == 3
+            store.close()
+
+    def test_ab_results_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/ab/results")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "results" in data
+
+
+# ══════════════════════════════════════════════════════════════
+# F09 — Versionamento de Perfis
+# ══════════════════════════════════════════════════════════════
+
+class TestVersionamentoPerfis:
+    def test_save_profile_version_increments(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            snap = {"model": "kr/claude-sonnet-4.5", "temperature": 0.7, "max_tokens": 400}
+            v1 = store.save_profile_version("claude-kiro", snap, note="v1 inicial")
+            v2 = store.save_profile_version("claude-kiro", {**snap, "temperature": 0.9}, note="v2 quente")
+            assert v1 == 1
+            assert v2 == 2
+            store.close()
+
+    def test_get_profile_versions_returns_all(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            snap = {"model": "kr/claude-sonnet-4.5", "temperature": 0.7}
+            store.save_profile_version("claude-kiro", snap)
+            store.save_profile_version("claude-kiro", snap)
+            versions = store.get_profile_versions("claude-kiro")
+            assert len(versions) == 2
+            # Deve vir da mais nova para a mais antiga (ORDER BY version DESC)
+            assert versions[0]["version"] == 2
+            # Snapshot deve ser dict parseado
+            assert isinstance(versions[0]["snapshot"], dict)
+            store.close()
+
+    def test_rollback_returns_correct_snapshot(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            snap_v1 = {"model": "kr/claude-sonnet-4.5", "temperature": 0.7, "max_tokens": 400}
+            snap_v2 = {"model": "kr/claude-sonnet-4.5", "temperature": 0.9, "max_tokens": 200}
+            store.save_profile_version("claude-kiro", snap_v1, note="v1")
+            store.save_profile_version("claude-kiro", snap_v2, note="v2")
+            rollback = store.rollback_profile_version("claude-kiro", 1)
+            assert rollback["temperature"] == 0.7
+            assert rollback["max_tokens"] == 400
+            store.close()
+
+    def test_rollback_nonexistent_version_returns_none(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            result = store.rollback_profile_version("claude-kiro", 999)
+            assert result is None
+            store.close()
+
+    def test_profile_versions_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.get("/profiles/claude-kiro/versions")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "versions" in data
+            assert data["profile_id"] == "claude-kiro"
+
+    def test_save_version_endpoint_requires_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/profiles/claude-kiro/versions", json={"note": "teste"})
+            assert resp.status_code == 401
+
+    def test_save_version_endpoint_with_token(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post("/profiles/claude-kiro/versions",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={"note": "snapshot de teste", "temperature": 0.85})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "saved"
+            assert data["version"] >= 1
+            assert data["snapshot"]["temperature"] == 0.85

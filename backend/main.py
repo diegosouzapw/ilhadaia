@@ -1491,3 +1491,221 @@ async def system_info():
         "registered_webhooks": webhook_manager.conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0],
         "agents_with_memory": len(memory_store.list_agents_with_memory()),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F06 — Temporadas e Ranking ELO
+# ═══════════════════════════════════════════════════════════════════════
+
+class SeasonRequest(BaseModel):
+    name: str
+    game_mode: str = "survival"
+    description: str = ""
+
+
+@app.post("/seasons", dependencies=[Depends(verify_admin_token)])
+async def create_season(req: SeasonRequest):
+    """F06: Cria uma nova temporada. Requer X-Admin-Token."""
+    sid = session_store.create_season(req.name, req.game_mode, req.description)
+    return {"status": "created", "season_id": sid, "name": req.name, "game_mode": req.game_mode}
+
+
+@app.get("/seasons")
+async def list_seasons():
+    """F06: Lista todas as temporadas."""
+    return {"seasons": session_store.get_seasons()}
+
+
+@app.post("/seasons/{season_id}/end", dependencies=[Depends(verify_admin_token)])
+async def end_season(season_id: str):
+    """F06: Encerra uma temporada. Requer X-Admin-Token."""
+    session_store.end_season(season_id)
+    return {"status": "ended", "season_id": season_id}
+
+
+@app.get("/seasons/{season_id}/leaderboard")
+async def season_leaderboard(season_id: str):
+    """F06: Retorna o leaderboard ELO da temporada."""
+    return {"season_id": season_id, "leaderboard": session_store.get_leaderboard_elo(season_id)}
+
+
+@app.post("/seasons/{season_id}/record", dependencies=[Depends(verify_admin_token)])
+async def record_elo_session(season_id: str, session_id: str = None):
+    """F06: Calcula e persiste o ELO dos agentes com base na sessão atual.
+    Usa o placar dos agentes vivos ordenado por score_total DESC.
+    """
+    target_session = session_id or _current_session_id
+    if not target_session:
+        raise HTTPException(400, "Nenhuma sessão ativa")
+
+    # Monta placements a partir dos agentes atuais
+    placements = sorted(
+        [{"profile_id": getattr(a, "profile_id", "claude-kiro"),
+          "score_total": a.benchmark.get("score", 0.0),
+          "agent_name": a.name}
+         for a in world.agents],
+        key=lambda x: -x["score_total"]
+    )
+    if not placements:
+        raise HTTPException(400, "Nenhum agente encontrado")
+
+    results = session_store.record_elo_session(season_id, target_session, placements)
+    return {"status": "recorded", "season_id": season_id, "session_id": target_session, "results": results}
+
+
+@app.get("/elo/{profile_id}")
+async def get_profile_elo(profile_id: str, season_id: str = None):
+    """F06: Retorna o ELO de um perfil (na temporada especificada ou em todas)."""
+    if season_id:
+        elo = session_store.get_elo(season_id, profile_id)
+        return {"profile_id": profile_id, "season_id": season_id, "elo": elo}
+    # Todas as temporadas
+    seasons = session_store.get_seasons()
+    result = {
+        "profile_id": profile_id,
+        "elo_by_season": {
+            s["id"]: {"name": s["name"], "elo": session_store.get_elo(s["id"], profile_id)}
+            for s in seasons
+        }
+    }
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F02 — Comparador A/B de Perfis
+# ═══════════════════════════════════════════════════════════════════════
+
+class ABRequest(BaseModel):
+    profile_a: str
+    profile_b: str
+    game_mode: str = "survival"
+    ticks: int = 200        # duração em ticks
+
+
+@app.post("/ab/compare", dependencies=[Depends(verify_admin_token)])
+async def ab_compare(req: ABRequest):
+    """F02: Registra manualmente um resultado A/B a partir do estado atual da sessão.
+    Compara os dois primeiros agentes que usam os profiles indicados.
+    """
+    from runtime.profiles import BUILTIN_PROFILES
+    from uuid import uuid4
+
+    if req.profile_a not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil A '{req.profile_a}' não encontrado")
+    if req.profile_b not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil B '{req.profile_b}' não encontrado")
+
+    agents_a = [a for a in world.agents if getattr(a, "profile_id", "") == req.profile_a]
+    agents_b = [a for a in world.agents if getattr(a, "profile_id", "") == req.profile_b]
+
+    if not agents_a:
+        raise HTTPException(400, f"Nenhum agente ativo com perfil '{req.profile_a}'")
+    if not agents_b:
+        raise HTTPException(400, f"Nenhum agente ativo com perfil '{req.profile_b}'")
+
+    ag_a = agents_a[0]
+    ag_b = agents_b[0]
+
+    run_id = str(uuid4())
+    result = session_store.record_ab_result(
+        run_id=run_id,
+        session_id=_current_session_id or "manual",
+        profile_a=req.profile_a,
+        profile_b=req.profile_b,
+        score_a=ag_a.benchmark.get("score", 0.0),
+        score_b=ag_b.benchmark.get("score", 0.0),
+        ticks_a=ag_a.benchmark.get("ticks_survived", 0),
+        ticks_b=ag_b.benchmark.get("ticks_survived", 0),
+        tokens_a=getattr(ag_a, "tokens_used", 0),
+        tokens_b=getattr(ag_b, "tokens_used", 0),
+        game_mode=req.game_mode,
+    )
+    return {"status": "recorded", **result}
+
+
+@app.get("/ab/results")
+async def get_ab_results(profile_a: str = None, profile_b: str = None, limit: int = 20):
+    """F02: Lista resultados de comparações A/B. Filtra por perfil se fornecido."""
+    results = session_store.get_ab_summary(profile_a=profile_a, profile_b=profile_b, limit=limit)
+    return {"count": len(results), "results": results}
+
+
+@app.get("/ab/stats")
+async def get_ab_stats():
+    """F02: Retorna estatísticas agregadas de vitórias/derrotas/empates por par de perfis."""
+    return {"stats": session_store.get_ab_stats()}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F09 — Versionamento de Perfis e Prompts
+# ═══════════════════════════════════════════════════════════════════════
+
+class ProfileVersionRequest(BaseModel):
+    note: str = ""
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    token_budget: Optional[int] = None
+    cooldown_ticks: Optional[int] = None
+    system_prompt_override: Optional[str] = None
+    created_by: str = "user"
+
+
+@app.post("/profiles/{profile_id}/versions", dependencies=[Depends(verify_admin_token)])
+async def save_profile_version(profile_id: str, req: ProfileVersionRequest):
+    """F09: Salva snapshot da versão atual de um perfil + overrides opcionais. Requer X-Admin-Token."""
+    from runtime.profiles import BUILTIN_PROFILES, get_profile
+    if profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil '{profile_id}' não encontrado")
+
+    profile = get_profile(profile_id)
+    snapshot = {
+        "model": profile.model,
+        "provider": profile.provider,
+        "temperature": req.temperature if req.temperature is not None else profile.temperature,
+        "max_tokens": req.max_tokens if req.max_tokens is not None else profile.max_tokens,
+        "token_budget": req.token_budget if req.token_budget is not None else profile.token_budget,
+        "cooldown_ticks": req.cooldown_ticks if req.cooldown_ticks is not None else profile.cooldown_ticks,
+        "system_prompt_override": req.system_prompt_override or None,
+    }
+    version = session_store.save_profile_version(profile_id, snapshot, req.note, req.created_by)
+    return {"status": "saved", "profile_id": profile_id, "version": version, "snapshot": snapshot}
+
+
+@app.get("/profiles/{profile_id}/versions")
+async def list_profile_versions(profile_id: str):
+    """F09: Lista o histórico de versões de um perfil."""
+    versions = session_store.get_profile_versions(profile_id)
+    return {"profile_id": profile_id, "total": len(versions), "versions": versions}
+
+
+@app.get("/profiles/versions/all")
+async def list_all_profile_versions():
+    """F09: Lista o histórico global de todas as versões de perfis."""
+    return {"versions": session_store.get_profile_versions_all()}
+
+
+@app.post("/profiles/{profile_id}/versions/{version}/rollback", dependencies=[Depends(verify_admin_token)])
+async def rollback_profile_version(profile_id: str, version: int):
+    """F09: Aplica snapshot de uma versão específica ao perfil ao vivo. Requer X-Admin-Token."""
+    snapshot = session_store.rollback_profile_version(profile_id, version)
+    if not snapshot:
+        raise HTTPException(404, f"Versão {version} do perfil '{profile_id}' não encontrada")
+
+    # Aplica snapshot aos agentes que usam este perfil
+    applied_to = []
+    for agent in world.agents:
+        if getattr(agent, "profile_id", "") == profile_id:
+            if "token_budget" in snapshot:
+                agent.token_budget = snapshot["token_budget"]
+            if "cooldown_ticks" in snapshot:
+                agent.cooldown_ticks = snapshot["cooldown_ticks"]
+            applied_to.append(agent.name)
+
+    logger.info(f"F09: Rollback {profile_id} → v{version} aplicado a {applied_to}")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔄 Perfil '{profile_id}' revertido para v{version}"}]
+    })
+    return {"status": "rolled_back", "profile_id": profile_id, "version": version,
+            "snapshot": snapshot, "applied_to_agents": applied_to}
+
