@@ -1848,3 +1848,140 @@ class TestEconomia:
         assert "economy" in state
         assert "market_prices" in state["economy"]
         assert "recipes" in state["economy"]
+
+
+# ══════════════════════════════════════════════════════════════
+# F20 — Guerra de Gangues
+# ══════════════════════════════════════════════════════════════
+
+class TestGuerraDeGangues:
+    def _make_gangwar_world(self):
+        from world import World
+        from agent import Agent
+        w = World(size=30, game_mode="gangwar")
+        for i, (name, x, y) in enumerate([("Alpha1", 3, 3), ("Beta1", 25, 25), ("Alpha2", 3, 25), ("Beta2", 25, 3)]):
+            ag = Agent(name, "test", x, y)
+            w.add_agent(ag)
+        w.gangwar.start(max_ticks=300)
+        w.economy.start()
+        return w
+
+    def test_gangwar_assigns_gangs(self):
+        w = self._make_gangwar_world()
+        assert w.gangwar.active
+        for agent in w.agents:
+            assert agent.id in w.gangwar.agent_gangs
+            assert w.gangwar.agent_gangs[agent.id] in ["alpha", "beta"]
+
+    def test_gangwar_depot_deposit_and_withdraw(self):
+        w = self._make_gangwar_world()
+        agent = w.agents[0]
+        gang = w.gangwar.agent_gangs[agent.id]
+        agent.inventory = ["apple", "apple"]
+        result = w.gangwar.deposit_item(agent.id, "apple", 2)
+        assert "error" not in result
+        assert w.gangwar.depots[gang].get("apple", 0) == 2
+        assert "apple" not in agent.inventory
+
+        result2 = w.gangwar.withdraw_item(agent.id, "apple", 1)
+        assert "error" not in result2
+        assert "apple" in agent.inventory
+        assert w.gangwar.depots[gang]["apple"] == 1
+
+    def test_gangwar_sabotage_locks_enemy_depot(self):
+        w = self._make_gangwar_world()
+        saboteur = next(a for a in w.agents if w.gangwar.agent_gangs[a.id] == "alpha")
+        enemy_gang = "beta"
+        w.gangwar.depots[enemy_gang]["apple"] = 10
+        events = []
+        result = w.gangwar.sabotage_depot(saboteur.id, enemy_gang, events)
+        assert "error" not in result
+        assert w.gangwar.depot_locked_until[enemy_gang] > w.ticks
+        assert any("sabotage" in str(e) for e in events)
+
+    def test_gangwar_sabotage_own_gang_returns_error(self):
+        w = self._make_gangwar_world()
+        agent = w.agents[0]
+        own_gang = w.gangwar.agent_gangs[agent.id]
+        events = []
+        result = w.gangwar.sabotage_depot(agent.id, own_gang, events)
+        assert "error" in result
+
+    def test_gangwar_depot_locked_prevents_deposit(self):
+        w = self._make_gangwar_world()
+        agent = next(a for a in w.agents if w.gangwar.agent_gangs[a.id] == "beta")
+        w.gangwar.depot_locked_until["beta"] = w.ticks + 10
+        agent.inventory = ["apple"]
+        result = w.gangwar.deposit_item(agent.id, "apple", 1)
+        assert "error" in result
+
+    def test_gangwar_black_market_buy(self):
+        w = self._make_gangwar_world()
+        agent = w.agents[0]
+        w.economy.coins[agent.id] = 50
+        w.gangwar.bm_stock["axe"] = 5
+        events = []
+        result = w.gangwar.bm_buy(agent.id, "axe", 1, events)
+        assert "error" not in result
+        assert "axe" in agent.inventory
+        assert any("bm_buy" in str(e) for e in events)
+
+    def test_gangwar_bm_insufficient_coins_error(self):
+        w = self._make_gangwar_world()
+        agent = w.agents[0]
+        w.economy.coins[agent.id] = 0
+        events = []
+        result = w.gangwar.bm_buy(agent.id, "explosive", 1, events)
+        assert "error" in result
+
+    def test_gangwar_supply_post_capture(self):
+        w = self._make_gangwar_world()
+        sp_id = list(w.gangwar.supply_posts.keys())
+        if not sp_id:
+            import pytest
+            pytest.skip("Sem supply posts no mapa")
+        sp = w.entities[sp_id[0]]
+        agent = next(a for a in w.agents if w.gangwar.agent_gangs[a.id] == "alpha")
+        agent.x, agent.y = sp["x"], sp["y"]
+        # Remove todos os agentes beta da zona
+        for a in w.agents:
+            if w.gangwar.agent_gangs[a.id] == "beta":
+                a.x, a.y = 29, 29
+        events = []
+        w.gangwar._tick_supply_capture(events)
+        assert w.gangwar.supply_posts[sp_id[0]] == "alpha"
+
+    def test_gangwar_stop_returns_winner(self):
+        w = self._make_gangwar_world()
+        w.gangwar.gang_scores["beta"] = 100.0
+        result = w.gangwar.stop()
+        assert result["winner_gang"] == "beta"
+        assert not w.gangwar.active
+
+    def test_gangwar_state_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/gangwar/state")
+            assert resp.status_code == 200
+            assert "gangwar" in resp.json()
+
+    def test_gangwar_bm_prices_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/gangwar/black-market/prices")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "prices" in data
+            assert "stock" in data
+
+    def test_get_state_includes_gangwar_in_gangwar_mode(self):
+        from world import World
+        w = World(size=30, game_mode="gangwar")
+        state = w.get_state()
+        assert "gangwar" in state
+        assert state["gangwar"] is not None
+        assert "gang_scores" in state["gangwar"]

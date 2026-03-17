@@ -2322,3 +2322,123 @@ async def economy_reputation():
             for agent in world.agents
         }
     }
+
+# ═══════════════════════════════════════════════════════════════════════
+# F20 — Guerra de Gangues (modo híbrido warfare + economy)
+# ═══════════════════════════════════════════════════════════════════════
+
+class GangWarStartRequest(BaseModel):
+    max_ticks: int = 500
+
+
+class SabotageRequest(BaseModel):
+    agent_id: str
+    target_gang: str
+
+
+class DepotRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+
+class BMBuyRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+
+@app.post("/gangwar/start", dependencies=[Depends(verify_admin_token)])
+async def gangwar_start(req: GangWarStartRequest = GangWarStartRequest()):
+    """F20: Inicia a Guerra de Gangues. Requer X-Admin-Token e game_mode=gangwar."""
+    if world.game_mode != "gangwar":
+        raise HTTPException(400, "Mundo não está no modo gangwar. Faça /reset com game_mode=gangwar.")
+    world.gangwar.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏴‍☠️ Guerra de Gangues iniciada! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "gangwar": world.gangwar.get_state()}
+
+
+@app.post("/gangwar/stop", dependencies=[Depends(verify_admin_token)])
+async def gangwar_stop():
+    """F20: Encerra a Guerra de Gangues."""
+    result = world.gangwar.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏆 Gangue {result.get('winner_gang', '?').upper()} venceu a guerra!"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.get("/gangwar/state")
+async def gangwar_state():
+    """F20: Retorna o estado completo da Guerra de Gangues."""
+    return {"game_mode": world.game_mode, "ticks": world.ticks, "gangwar": world.gangwar.get_state()}
+
+
+@app.post("/gangwar/sabotage")
+async def gangwar_sabotage(req: SabotageRequest):
+    """F20: Agente sabota o depósito da gangue inimiga."""
+    events = []
+    result = world.gangwar.sabotage_depot(req.agent_id, req.target_gang, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/gangwar/depot/deposit")
+async def gangwar_depot_deposit(req: DepotRequest):
+    """F20: Agente deposita item no depósito da própria gangue."""
+    result = world.gangwar.deposit_item(req.agent_id, req.item, req.qty)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.post("/gangwar/depot/withdraw")
+async def gangwar_depot_withdraw(req: DepotRequest):
+    """F20: Agente retira item do depósito da própria gangue."""
+    result = world.gangwar.withdraw_item(req.agent_id, req.item, req.qty)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.get("/gangwar/depot/{gang}")
+async def gangwar_depot_state(gang: str):
+    """F20: Retorna estado do depósito de uma gangue."""
+    if gang not in ["alpha", "beta"]:
+        raise HTTPException(400, "Gangue deve ser 'alpha' ou 'beta'")
+    locked_until = world.gangwar.depot_locked_until.get(gang, 0)
+    return {
+        "gang": gang,
+        "depot": world.gangwar.depots.get(gang, {}),
+        "locked": locked_until > world.ticks,
+        "locked_until_tick": locked_until,
+    }
+
+
+@app.post("/gangwar/black-market/buy")
+async def gangwar_bm_buy(req: BMBuyRequest):
+    """F20: Agente compra item no mercado negro (preços voláteis, sem rastreio)."""
+    events = []
+    result = world.gangwar.bm_buy(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/gangwar/black-market/prices")
+async def gangwar_bm_prices():
+    """F20: Retorna preços e estoque atual do mercado negro."""
+    return {
+        "prices": world.gangwar.bm_prices,
+        "stock": world.gangwar.bm_stock,
+        "items": world.gangwar.BLACK_MARKET_ITEMS if hasattr(world.gangwar, 'BLACK_MARKET_ITEMS') else list(world.gangwar.bm_prices),
+    }

@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from runtime.gincana_engine import GincanaEngine
 from runtime.warfare_engine import WarfareEngine
 from runtime.economy_engine import EconomyEngine
+from runtime.gangwar_engine import GangWarEngine
 
 logger = logging.getLogger("BBB_IA")
 
@@ -18,6 +19,7 @@ class World:
         "gincana":  32,
         "warfare":  40,
         "economy":  36,
+        "gangwar":  40,
         "hybrid":   44,
     }
     VALID_MODES = set(MODE_SIZES.keys())
@@ -95,6 +97,9 @@ class World:
 
         # ── F10+F17+F18+F19 — Economia ───────────────────────────────────────
         self.economy: EconomyEngine = EconomyEngine(self)
+
+        # ── F20 — Guerra de Gangues ──────────────────────────────────────────
+        self.gangwar: GangWarEngine = GangWarEngine(self)
 
         # Day/Night Cycle: 120 ticks total (70 day + 10 dusk + 30 night + 10 dawn)
         self.DAY_CYCLE = 120
@@ -986,6 +991,10 @@ class World:
         if self.economy.active:
             self.economy.tick(events)
 
+        # ── F20 — GangWar Engine ─────────────────────────────────────────────
+        if self.game_mode == "gangwar" and self.gangwar.active:
+            self.gangwar.tick(events)
+
         return events
 
 
@@ -1583,6 +1592,8 @@ class World:
             "warfare": self.warfare.get_state() if self.game_mode == "warfare" else None,
             # F10+F17+F18+F19 — Economy (sempre exposto independente de modo)
             "economy": self.economy.get_state(),
+            # F20 — Guerra de Gangues
+            "gangwar": self.gangwar.get_state() if self.game_mode == "gangwar" else None,
         }
 
     def reset_agents(self, AgentClass, player_count=None):
