@@ -1709,3 +1709,123 @@ async def rollback_profile_version(profile_id: str, version: int):
     return {"status": "rolled_back", "profile_id": profile_id, "version": version,
             "snapshot": snapshot, "applied_to_agents": applied_to}
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# F04 — Eventos Dinâmicos da Ilha
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/events/active")
+async def get_active_event():
+    """F04: Retorna o evento global ativo no momento."""
+    return {"active_event": world.active_event, "ticks": world.ticks}
+
+
+@app.get("/events/history")
+async def get_event_history():
+    """F04: Retorna o histórico de todos os eventos da sessão."""
+    return {"count": len(world.event_history), "events": world.event_history}
+
+
+@app.post("/events/trigger", dependencies=[Depends(verify_admin_token)])
+async def trigger_event_manual(event_type: str):
+    """F04: Dispara um evento global manualmente. Requer X-Admin-Token."""
+    if event_type not in world.DYNAMIC_EVENTS:
+        raise HTTPException(400, f"Tipo inválido. Válidos: {list(world.DYNAMIC_EVENTS.keys())}")
+    event = world.trigger_event(event_type)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "event", "event_msg": f"{event['name']}: {event['message']}"}]
+    })
+    return {"status": "triggered", "event": event}
+
+
+@app.get("/events/types")
+async def list_event_types():
+    """F04: Lista todos os tipos de eventos com efeitos."""
+    return {"event_types": {k: {"name": v["name"], "duration": v["duration"],
+        "hp_delta": v.get("hp_delta", 0)} for k, v in world.DYNAMIC_EVENTS.items()}}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F07 — Reputação Social e Alianças
+# ═══════════════════════════════════════════════════════════════════════
+
+class AllianceRequest(BaseModel):
+    agent_b_name: str
+
+
+@app.post("/agents/{agent_id}/alliance")
+async def form_alliance(agent_id: str, req: AllianceRequest):
+    """F07: Forma aliança entre agente e outro (por nome)."""
+    result = world.form_alliance(agent_id, req.agent_b_name)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    await manager.broadcast({"type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🤝 Aliança: {result.get('alliance')}"}]})
+    return result
+
+
+@app.delete("/agents/{agent_id}/alliance")
+async def break_alliance_endpoint(agent_id: str, betrayal: bool = False):
+    """F07: Quebra aliança. betrayal=true aplica penalidade de reputação."""
+    result = world.break_alliance(agent_id, betrayal=betrayal)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    await manager.broadcast({"type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": "💔 Aliança quebrada"}]})
+    return result
+
+
+@app.get("/agents/{agent_id}/reputation")
+async def get_agent_reputation(agent_id: str):
+    """F07: Retorna dados de reputação social do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    return {"agent_id": agent.id, "name": agent.name, "alliance": agent.alliance,
+            "reputation_score": round(agent.reputation_score, 2),
+            "betrayals": agent.betrayals, "promises": agent.promises}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F08 — Missões Individuais
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/missions/catalog")
+async def get_mission_catalog():
+    """F08: Retorna o catálogo completo de missões."""
+    return {"count": len(world.mission_catalog), "missions": world.mission_catalog}
+
+
+@app.post("/missions/assign", dependencies=[Depends(verify_admin_token)])
+async def assign_missions_endpoint():
+    """F08: Atribui missões aleatórias a todos os agentes. Requer X-Admin-Token."""
+    world.assign_missions()
+    return {"status": "assigned",
+            "assignments": [{"agent": a.name, "mission_id": a.mission_id} for a in world.agents]}
+
+
+@app.get("/agents/{agent_id}/mission")
+async def get_agent_mission(agent_id: str):
+    """F08: Retorna o progresso de missão de um agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    mission = next((m for m in world.mission_catalog if m["id"] == agent.mission_id), None)
+    return {"agent_id": agent.id, "name": agent.name, "mission_id": agent.mission_id,
+            "mission": mission, "progress": agent.mission_state.get("progress", 0),
+            "target": mission["target"] if mission else None,
+            "completed": agent.mission_completed_tick is not None,
+            "completed_tick": agent.mission_completed_tick,
+            "bonus_score": agent.mission_bonus_score}
+
+
+@app.get("/missions/progress")
+async def get_all_missions_progress():
+    """F08: Retorna o progresso de missões de todos os agentes."""
+    return {"ticks": world.ticks, "missions": [
+        {"agent": a.name, "mission_id": a.mission_id,
+         "progress": a.mission_state.get("progress", 0),
+         "completed": a.mission_completed_tick is not None,
+         "bonus_score": a.mission_bonus_score}
+        for a in world.agents]}

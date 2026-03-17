@@ -67,11 +67,28 @@ class World:
         self.session_id: Optional[str] = None
         self.tournament_end_tick: Optional[int] = None
         self.active_tournament_id: Optional[str] = None
-        
+
+        # ── F04 — Eventos Dinâmicos da Ilha ──────────────────────────────────
+        self.active_event: Optional[dict] = None    # {type, message, end_tick, effects}
+        self.event_end_tick: int = 0
+        self.event_history: List[dict] = []         # Histórico de eventos da sessão
+        # Probabilidade por tick de disparar evento (ajustável)
+        self.event_chance: float = 0.005            # ~0.5% por tick = ~1 evento a cada 200 ticks
+
+        # ── F07 — Reputação Social ────────────────────────────────────────────
+        # Rastreamento global de alianças para evitar duplicatas e decidir bônus
+        self.alliance_bonus_hp_per_tick: float = 0.15  # HP extra por tick para aliados próximos
+        self.betrayal_penalty: float = -20.0           # Delta de reputação por traição
+
+        # ── F08 — Missões Individuais ─────────────────────────────────────────
+        self.mission_catalog: List[dict] = []       # Preenchido em _init_missions()
+        self._init_missions()
+
         # Day/Night Cycle: 120 ticks total (70 day + 10 dusk + 30 night + 10 dawn)
         self.DAY_CYCLE = 120
         self._was_night = False  # Track night transitions for zombie conversion
         self._load_history()
+
 
     def _resolve_world_size(self, size) -> int:
         if size is None:
@@ -292,10 +309,335 @@ class World:
         if mode_objects:
             logger.info(f"Mode '{self.game_mode}': spawned {len(mode_objects)} extra objects.")
 
+    # ── F08 — Catálogo de Missões ─────────────────────────────────────────────
+
+    def _init_missions(self) -> None:
+        """Inicializa o catálogo de 8 missões disponíveis."""
+        self.mission_catalog = [
+            {
+                "id": "explore_all_quadrants",
+                "name": "Explorador Completo",
+                "description": "Visite os 4 quadrantes do mapa.",
+                "type": "exploration",
+                "target": 4,
+                "bonus_score": 15.0,
+            },
+            {
+                "id": "collect_fruits",
+                "name": "Coletor de Frutas",
+                "description": "Coma ou colete 5 frutas.",
+                "type": "collect",
+                "target": 5,
+                "bonus_score": 10.0,
+            },
+            {
+                "id": "social_butterfly",
+                "name": "Borboleta Social",
+                "description": "Converse com todos os outros agentes vivos ao menos uma vez.",
+                "type": "social",
+                "target": 3,
+                "bonus_score": 12.0,
+            },
+            {
+                "id": "survival_100_ticks",
+                "name": "Sobrevivente",
+                "description": "Sobreviva sem morrer por 100 ticks.",
+                "type": "survival",
+                "target": 100,
+                "bonus_score": 20.0,
+            },
+            {
+                "id": "alliance_keeper",
+                "name": "Guardião da Aliança",
+                "description": "Mantenha uma aliança ativa por 30 ticks.",
+                "type": "alliance",
+                "target": 30,
+                "bonus_score": 18.0,
+            },
+            {
+                "id": "water_provider",
+                "name": "Provedor de Água",
+                "description": "Beba água 8 vezes.",
+                "type": "drink",
+                "target": 8,
+                "bonus_score": 8.0,
+            },
+            {
+                "id": "bury_2_bodies",
+                "name": "Coveiro da Ilha",
+                "description": "Enterre 2 corpos no cemitério.",
+                "type": "bury",
+                "target": 2,
+                "bonus_score": 14.0,
+            },
+            {
+                "id": "stay_healthy",
+                "name": "Saúde de Ferro",
+                "description": "Mantenha HP acima de 80% por 50 ticks consecutivos.",
+                "type": "health",
+                "target": 50,
+                "bonus_score": 16.0,
+            },
+        ]
+
+    def assign_missions(self) -> None:
+        """Atribui missões aleatórias únicas a cada agente na sessão."""
+        import random as rn
+        available = list(self.mission_catalog)
+        rn.shuffle(available)
+        for i, agent in enumerate(self.agents):
+            mission = available[i % len(available)]
+            agent.mission_id = mission["id"]
+            agent.mission_state = {"progress": 0, "visited_quadrants": [], "chat_targets": []}
+            agent.mission_completed_tick = None
+            agent.mission_bonus_score = 0.0
+            logger.debug(f"Mission assigned: {agent.name} → {mission['name']}")
+
+    def _tick_missions_f08(self, events: list) -> None:
+        """Avança o progresso de missões para cada agente vivo."""
+        for agent in self.agents:
+            if not agent.is_alive or not agent.mission_id:
+                continue
+            if agent.mission_completed_tick is not None:
+                continue
+
+            mission = next((m for m in self.mission_catalog if m["id"] == agent.mission_id), None)
+            if not mission:
+                continue
+
+            state = agent.mission_state
+            mtype = mission["type"]
+            target = mission["target"]
+            completed = False
+
+            if mtype == "exploration":
+                # Verifica quadrante atual
+                qx = 0 if agent.x < self.size // 2 else 1
+                qy = 0 if agent.y < self.size // 2 else 1
+                q_label = f"{qx}_{qy}"
+                visited = state.setdefault("visited_quadrants", [])
+                if q_label not in visited:
+                    visited.append(q_label)
+                state["progress"] = len(visited)
+                completed = len(visited) >= target
+
+            elif mtype == "collect":
+                state["progress"] = agent.apples_eaten
+                completed = agent.apples_eaten >= target
+
+            elif mtype == "social":
+                state["progress"] = len(state.get("chat_targets", []))
+                completed = state["progress"] >= target
+
+            elif mtype == "survival":
+                state["progress"] = min(agent.benchmark.get("ticks_survived", 0), target)
+                completed = state["progress"] >= target
+
+            elif mtype == "alliance":
+                if agent.alliance is not None:
+                    state["progress"] = self.ticks - agent.alliance_since_tick
+                else:
+                    state["progress"] = 0
+                completed = state["progress"] >= target
+
+            elif mtype == "drink":
+                state["progress"] = agent.water_drunk
+                completed = agent.water_drunk >= target
+
+            elif mtype == "bury":
+                state["progress"] = state.get("buried_count", 0)
+                completed = state["progress"] >= target
+
+            elif mtype == "health":
+                if agent.hp >= 80:
+                    state["progress"] = state.get("progress", 0) + 1
+                else:
+                    state["progress"] = 0
+                completed = state["progress"] >= target
+
+            if completed:
+                agent.mission_completed_tick = self.ticks
+                bonus = mission["bonus_score"]
+                agent.mission_bonus_score += bonus
+                agent.benchmark["score"] = agent.benchmark.get("score", 0) + bonus
+                events.append({
+                    "agent_id": agent.id, "name": agent.name,
+                    "action": "mission_complete",
+                    "event_msg": f"🏅 {agent.name} concluiu a missão '{mission['name']}' (+{bonus} pts)!"
+                })
+                logger.info(f"Mission complete: {agent.name} → {mission['name']} (+{bonus})")
+
+    # ── F04 — Engine de Eventos Dinâmicos ─────────────────────────────────────
+
+    DYNAMIC_EVENTS = {
+        "tempestade": {
+            "name": "🌩️ Tempestade",
+            "message": "Uma tempestade violenta assola a ilha! Todos perdem HP.",
+            "duration": 10,
+            "hp_delta": -5,
+            "hunger_delta": 0,
+            "thirst_delta": -10,  # chuva enche água
+        },
+        "seca": {
+            "name": "🌵 Grande Seca",
+            "message": "Uma seca intensa se instala. A sede aumenta rapidamente.",
+            "duration": 15,
+            "hp_delta": -2,
+            "hunger_delta": -3,
+            "thirst_delta": -8,
+        },
+        "suprimentos": {
+            "name": "📦 Queda de Suprimentos",
+            "message": "Um avião anônimo lança caixotes de suprimentos no centro da ilha!",
+            "duration": 5,
+            "hp_delta": 0,
+            "hunger_delta": 0,
+            "thirst_delta": 0,
+            "spawn_supplies": True,
+        },
+        "radio": {
+            "name": "📻 Transmissão de Rádio",
+            "message": "Um rádio misterioso transmite uma mensagem de fora da ilha: 'Ajuda a caminho... talvez.'",
+            "duration": 3,
+            "hp_delta": 5,   # Moral boost
+            "hunger_delta": 0,
+            "thirst_delta": 0,
+        },
+        "eclipse": {
+            "name": "🌑 Eclipse Solar",
+            "message": "O sol desaparece! Um eclipse cobre a ilha, desorientando todos.",
+            "duration": 8,
+            "hp_delta": -1,
+            "hunger_delta": -5,
+            "thirst_delta": 0,
+            "force_night": True,
+        },
+    }
+
+    def trigger_event(self, event_type: str) -> dict:
+        """Dispara um evento global. Retorna o dict do evento."""
+        template = self.DYNAMIC_EVENTS.get(event_type)
+        if not template:
+            return {}
+        event = {
+            **template,
+            "type": event_type,
+            "start_tick": self.ticks,
+            "end_tick": self.ticks + template["duration"],
+        }
+        self.active_event = event
+        self.event_end_tick = event["end_tick"]
+        self.event_history.append(event)
+        logger.info(f"F04: Event triggered: {event_type} at tick {self.ticks}")
+        return event
+
+    def _tick_events_f04(self, events: list) -> None:
+        """Aplica efeitos de evento ativo e sorteia novo evento aleatório."""
+        # 1. Limpa evento expirado
+        if self.active_event and self.ticks >= self.event_end_tick:
+            logger.info(f"F04: Event ended: {self.active_event['type']}")
+            self.active_event = None
+
+        # 2. Aplica efeitos do evento ativo em todos os agentes vivos
+        if self.active_event:
+            ev = self.active_event
+            hp_d = ev.get("hp_delta", 0)
+            h_d = ev.get("hunger_delta", 0)
+            t_d = ev.get("thirst_delta", 0)
+            for agent in self.agents:
+                if not agent.is_alive:
+                    continue
+                if hp_d != 0:
+                    agent.hp = max(0, min(100, agent.hp + hp_d))
+                if h_d != 0:
+                    agent.hunger = max(0, min(100, agent.hunger + h_d))
+                if t_d != 0:
+                    agent.thirst = max(0, min(100, agent.thirst + t_d))
+
+            # Spawn suprimentos se configurado (só no primeiro tick do evento)
+            if ev.get("spawn_supplies") and self.ticks == ev["start_tick"]:
+                cx, cy = self.size // 2, self.size // 2
+                for i in range(3):
+                    eid = f"supply_drop_{self.ticks}_{i}"
+                    self.add_entity(eid, {"type": "supply_crate", "x": cx + i, "y": cy,
+                                          "name": f"Suprimentos Aéreos {i+1}", "loot": ["fruit", "water_bottle"]})
+
+            # Broadcast do evento (só no primeiro tick)
+            if self.ticks == ev["start_tick"]:
+                events.append({
+                    "agent_id": None, "name": None,
+                    "action": "event",
+                    "event_msg": f"{ev['name']}: {ev['message']}"
+                })
+
+        # 3. Sorteia novo evento se nenhum ativo
+        if not self.active_event and random.random() < self.event_chance:
+            event_type = random.choice(list(self.DYNAMIC_EVENTS.keys()))
+            ev = self.trigger_event(event_type)
+            if ev:
+                events.append({
+                    "agent_id": None, "name": None,
+                    "action": "event",
+                    "event_msg": f"{ev['name']}: {ev['message']}"
+                })
+
+    # ── F07 — Reputação Social e Alianças ─────────────────────────────────────
+
+    def form_alliance(self, agent_a_id: str, agent_b_name: str) -> dict:
+        """Forma aliança entre agente A e o agente com nome agent_b_name."""
+        agent_a = next((a for a in self.agents if a.id == agent_a_id), None)
+        agent_b = next((a for a in self.agents if a.name == agent_b_name and a.is_alive), None)
+        if not agent_a or not agent_b:
+            return {"error": "Agente não encontrado"}
+        agent_a.alliance = agent_b.name
+        agent_a.alliance_since_tick = self.ticks
+        agent_b.alliance = agent_a.name
+        agent_b.alliance_since_tick = self.ticks
+        agent_a.reputation_score = min(100.0, agent_a.reputation_score + 5.0)
+        agent_b.reputation_score = min(100.0, agent_b.reputation_score + 5.0)
+        logger.info(f"F07: Alliance formed: {agent_a.name} ↔ {agent_b.name}")
+        return {"alliance": f"{agent_a.name} ↔ {agent_b.name}", "since_tick": self.ticks}
+
+    def break_alliance(self, agent_id: str, betrayal: bool = False) -> dict:
+        """Quebra aliança do agente. Se betrayal=True, aplica penalidade de reputação."""
+        agent = next((a for a in self.agents if a.id == agent_id), None)
+        if not agent:
+            return {"error": "Agente não encontrado"}
+        ally_name = agent.alliance
+        # Quebra no aliado também
+        ally = next((a for a in self.agents if a.name == ally_name), None)
+        if ally:
+            ally.alliance = None
+        agent.alliance = None
+        if betrayal:
+            agent.betrayals += 1
+            agent.reputation_score = max(-100.0, agent.reputation_score + self.betrayal_penalty)
+            logger.info(f"F07: Betrayal by {agent.name}! Reputation: {agent.reputation_score}")
+        return {"status": "alliance_broken", "betrayal": betrayal, "agent": agent.name}
+
+    def _tick_reputation_f07(self, events: list) -> None:
+        """Aplica bônus de HP para aliados próximos e atualiza reputação por tick."""
+        for agent in self.agents:
+            if not agent.is_alive or not agent.alliance:
+                continue
+            ally = next((a for a in self.agents if a.name == agent.alliance and a.is_alive), None)
+            if not ally:
+                # Aliado morreu — remove aliança automaticamente
+                agent.alliance = None
+                continue
+            # Bônus de HP se aliados estão a menos de 3 tiles
+            dist = abs(agent.x - ally.x) + abs(agent.y - ally.y)
+            if dist <= 3:
+                bonus = self.alliance_bonus_hp_per_tick
+                agent.hp = min(100, agent.hp + bonus)
+                ally.hp = min(100, ally.hp + bonus)
+            # Leve acúmulo de reputação por manter aliança
+            agent.reputation_score = min(100.0, agent.reputation_score + 0.05)
+
 
     def add_entity(self, entity_id: str, data: dict):
         self.entities[entity_id] = data
-        
+
     def add_agent(self, agent):
         # Prevent spawn on top of obstacles
         while not self._is_walkable(agent.x, agent.y) or any(a.x == agent.x and a.y == agent.y for a in self.agents):
@@ -614,8 +956,14 @@ class World:
                     if not getattr(agent, 'is_remote', False) and agent.id not in self.thinking_agents and not is_walking and not just_arrived:
                         context = self._get_context_for_agent(agent)
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
-                
+
+        # ── F04/F07/F08 — Motores de fase 3 ──────────────────────────────────
+        self._tick_events_f04(events)
+        self._tick_missions_f08(events)
+        self._tick_reputation_f07(events)
+
         return events
+
 
     def _check_auto_interactions(self, agent, events):
         """Processes automatic actions like gathering and picking up items upon collision/proximity."""
@@ -1200,6 +1548,11 @@ class World:
             "day_cycle": self.ticks % self.DAY_CYCLE,
             "is_night": 80 <= (self.ticks % self.DAY_CYCLE) < 110,
             "game_mode": self.game_mode,
+            # F04 — Evento ativo
+            "active_event": self.active_event,
+            "event_history_count": len(self.event_history),
+            # F08 — Catálogo de missões
+            "mission_catalog_count": len(self.mission_catalog),
         }
 
     def reset_agents(self, AgentClass, player_count=None):

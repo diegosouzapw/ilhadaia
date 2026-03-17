@@ -983,3 +983,216 @@ class TestVersionamentoPerfis:
             assert data["status"] == "saved"
             assert data["version"] >= 1
             assert data["snapshot"]["temperature"] == 0.85
+
+
+# ══════════════════════════════════════════════════════════════
+# F04 — Eventos Dinâmicos da Ilha
+# ══════════════════════════════════════════════════════════════
+
+class TestEventosDinamicos:
+    def test_dynamic_events_catalog(self):
+        from world import World
+        w = World(size=20)
+        assert len(w.DYNAMIC_EVENTS) == 5
+        assert "tempestade" in w.DYNAMIC_EVENTS
+        assert "seca" in w.DYNAMIC_EVENTS
+        assert "suprimentos" in w.DYNAMIC_EVENTS
+        assert "radio" in w.DYNAMIC_EVENTS
+        assert "eclipse" in w.DYNAMIC_EVENTS
+
+    def test_trigger_event_sets_active(self):
+        from world import World
+        w = World(size=20)
+        ev = w.trigger_event("tempestade")
+        assert ev["type"] == "tempestade"
+        assert w.active_event is not None
+        assert w.active_event["type"] == "tempestade"
+        assert len(w.event_history) == 1
+
+    def test_trigger_invalid_event_returns_empty(self):
+        from world import World
+        w = World(size=20)
+        ev = w.trigger_event("tsunami")
+        assert ev == {}
+        assert w.active_event is None
+
+    def test_event_ends_after_duration(self):
+        from world import World
+        w = World(size=20)
+        w.trigger_event("radio")  # duration=3
+        # Simula que o tick passou além do evento
+        w.ticks = w.event_end_tick + 1
+        events = []
+        w._tick_events_f04(events)
+        assert w.active_event is None
+
+    def test_event_applies_hp_delta(self):
+        from world import World
+        from agent import Agent
+        w = World(size=20)
+        ag = Agent("Ana", "test", 5, 5)
+        w.add_agent(ag)
+        ag.hp = 100
+        w.trigger_event("tempestade")  # hp_delta=-5
+        w.ticks = w.active_event["start_tick"]  # mesmo tick do evento
+        events = []
+        w._tick_events_f04(events)
+        # HP deve ter diminuído pelo hp_delta
+        assert ag.hp <= 95
+
+    def test_events_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/events/active")
+            assert resp.status_code == 200
+            assert "active_event" in resp.json()
+
+            resp2 = client.get("/events/types")
+            assert resp2.status_code == 200
+            assert "event_types" in resp2.json()
+
+
+# ══════════════════════════════════════════════════════════════
+# F07 — Reputação Social e Alianças
+# ══════════════════════════════════════════════════════════════
+
+class TestReputacaoSocial:
+    def setup_world_with_agents(self):
+        from world import World
+        from agent import Agent
+        w = World(size=20)
+        a1 = Agent("Joana", "test", 2, 2, agent_id="a1")
+        a2 = Agent("Pedro", "test", 5, 5, agent_id="a2")
+        w.add_agent(a1)
+        w.add_agent(a2)
+        return w, a1, a2
+
+    def test_form_alliance_sets_both_agents(self):
+        w, a1, a2 = self.setup_world_with_agents()
+        result = w.form_alliance("a1", "Pedro")
+        assert "alliance" in result
+        assert a1.alliance == "Pedro"
+        assert a2.alliance == "Joana"
+
+    def test_break_alliance_clears_both(self):
+        w, a1, a2 = self.setup_world_with_agents()
+        w.form_alliance("a1", "Pedro")
+        result = w.break_alliance("a1", betrayal=False)
+        assert result["status"] == "alliance_broken"
+        assert a1.alliance is None
+        assert a2.alliance is None
+
+    def test_betrayal_applies_reputation_penalty(self):
+        w, a1, a2 = self.setup_world_with_agents()
+        w.form_alliance("a1", "Pedro")
+        a1.reputation_score = 50.0
+        w.break_alliance("a1", betrayal=True)
+        assert a1.betrayals == 1
+        assert a1.reputation_score < 50.0  # Penalidade aplicada
+
+    def test_alliance_hp_bonus_when_close(self):
+        w, a1, a2 = self.setup_world_with_agents()
+        w.form_alliance("a1", "Pedro")
+        a1.x, a1.y = 3, 3
+        a2.x, a2.y = 4, 4  # dist=2 <= 3 → bônus ativo
+        a1.hp = 90.0
+        a2.hp = 88.0
+        events = []
+        w._tick_reputation_f07(events)
+        assert a1.hp > 90.0
+        assert a2.hp > 88.0
+
+    def test_reputation_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            # Pegar um agente real
+            resp_state = client.get("/state")
+            agents = resp_state.json().get("agents", [])
+            if agents:
+                agent_id = agents[0]["id"]
+                resp = client.get(f"/agents/{agent_id}/reputation")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert "reputation_score" in data
+
+
+# ══════════════════════════════════════════════════════════════
+# F08 — Missões Individuais
+# ══════════════════════════════════════════════════════════════
+
+class TestMissoesIndividuais:
+    def test_mission_catalog_has_8_missions(self):
+        from world import World
+        w = World(size=20)
+        assert len(w.mission_catalog) == 8
+        ids = [m["id"] for m in w.mission_catalog]
+        assert "explore_all_quadrants" in ids
+        assert "survival_100_ticks" in ids
+        assert "stay_healthy" in ids
+
+    def test_assign_missions_sets_mission_on_each_agent(self):
+        from world import World
+        from agent import Agent
+        w = World(size=20)
+        for i in range(4):
+            ag = Agent(f"Agent{i}", "test", i, i)
+            w.add_agent(ag)
+        w.assign_missions()
+        for ag in w.agents:
+            assert ag.mission_id is not None
+            assert ag.mission_completed_tick is None
+
+    def test_mission_exploration_completes_on_4_quadrants(self):
+        from world import World
+        from agent import Agent
+        w = World(size=20)
+        ag = Agent("Explorer", "test", 1, 1)
+        w.add_agent(ag)
+        ag.mission_id = "explore_all_quadrants"
+        ag.mission_state = {"progress": 0, "visited_quadrants": []}
+        # Visitar quadrante 0_0
+        ag.x, ag.y = 1, 1
+        events = []
+        w._tick_missions_f08(events)
+        assert "0_0" in ag.mission_state.get("visited_quadrants", [])
+
+    def test_mission_survival_completes_at_100_ticks(self):
+        from world import World
+        from agent import Agent
+        w = World(size=20)
+        w.ticks = 200
+        ag = Agent("Survivor", "test", 5, 5)
+        w.add_agent(ag)
+        ag.mission_id = "survival_100_ticks"
+        ag.mission_state = {"progress": 0}
+        ag.benchmark["ticks_survived"] = 120  # Já sobreviveu 120 ticks
+        events = []
+        w._tick_missions_f08(events)
+        assert ag.mission_completed_tick is not None
+        assert ag.mission_bonus_score > 0
+        # Deve ter evento de conclusão
+        assert any("mission_complete" in str(e) for e in events)
+
+    def test_missions_catalog_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/missions/catalog")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["count"] == 8
+            assert len(data["missions"]) == 8
+
+    def test_missions_progress_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/missions/progress")
+            assert resp.status_code == 200
+            assert "missions" in resp.json()

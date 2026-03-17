@@ -88,7 +88,20 @@ class Agent:
         self.command_expire_tick: int = 0            # Tick em que o comando expira
         self.command_source: str = "ai"              # "ai" | "human"
 
-        
+        # ── F07 — Reputação Social e Alianças ────────────────────────────────
+        self.alliance: Optional[str] = None          # Nome do aliado atual (ou None)
+        self.alliance_since_tick: int = 0            # Tick em que a aliança foi formada
+        self.promises: list = []                     # [{to: nome, promise: texto, tick: N}]
+        self.betrayals: int = 0                      # Número de traições cometidas
+        self.reputation_score: float = 0.0           # Pontuação de reputação social
+        self.alliance_hp_bonus: bool = False         # Se aliança ativa confere bônus de HP
+
+        # ── F08 — Missões Individuais ─────────────────────────────────────────
+        self.mission_id: Optional[str] = None        # ID da missão ativa
+        self.mission_state: dict = {}                # Progresso: {collected: 0, visited: [], etc.}
+        self.mission_completed_tick: Optional[int] = None  # Tick de conclusão
+        self.mission_bonus_score: float = 0.0        # Score bônus acumulado por missões
+
         # Determine home coordinates
         home_coords = "(2, 2)" # Default fallback
         if self.name == "João": home_coords = "(2, 2)"
