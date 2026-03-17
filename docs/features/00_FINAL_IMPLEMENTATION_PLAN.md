@@ -150,11 +150,12 @@ Saidas:
 
 Features:
 
-- F17, F18, F19
+- F17, F10, F18, F19
 
 Saidas:
 
 - economia local
+- camada de crafting e construcao integrada ao ciclo economico
 - oferta e demanda dinamica
 - contratos e reputacao comercial
 

@@ -44,6 +44,7 @@ Legenda:
 ## Fase 6
 
 - [ ] F17 - Modo Economia Local
+- [ ] F10 - Economia e Crafting
 - [ ] F18 - Mercado Dinamico
 - [ ] F19 - Contratos e Reputacao Comercial
 
