@@ -1889,3 +1889,93 @@ async def gincana_templates():
             "delivery": 20,
         }
     }
+
+# ═══════════════════════════════════════════════════════════════════════
+# F13-F16 — Modo Warfare
+# ═══════════════════════════════════════════════════════════════════════
+
+class WarfareStartRequest(BaseModel):
+    max_ticks: int = 600
+
+
+class ThrowRequest(BaseModel):
+    attacker_id: str
+    target_x: int
+    target_y: int
+
+
+@app.post("/warfare/start", dependencies=[Depends(verify_admin_token)])
+async def warfare_start(req: WarfareStartRequest = WarfareStartRequest()):
+    """F13: Inicia o Warfare. Requer X-Admin-Token e game_mode=warfare."""
+    if world.game_mode != "warfare":
+        raise HTTPException(400, "Mundo não está no modo warfare. Faça /reset com game_mode=warfare.")
+    world.warfare.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"⚔️ Warfare iniciado! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "max_ticks": req.max_ticks, "warfare": world.warfare.get_state()}
+
+
+@app.post("/warfare/stop", dependencies=[Depends(verify_admin_token)])
+async def warfare_stop():
+    """F13: Encerra o Warfare. Requer X-Admin-Token."""
+    result = world.warfare.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏴 Warfare encerrado! Facção {result.get('winner_faction', '?').upper()} vence!"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.get("/warfare/state")
+async def warfare_state():
+    """F13-F16: Retorna estado completo do Warfare (facções, território, placar)."""
+    return {
+        "game_mode": world.game_mode,
+        "ticks": world.ticks,
+        "warfare": world.warfare.get_state(),
+    }
+
+
+@app.post("/warfare/throw")
+async def warfare_throw(req: ThrowRequest):
+    """F14: Arremessa uma pedra de um agente para uma posição alvo."""
+    events = []
+    result = world.warfare.throw_stone(req.attacker_id, req.target_x, req.target_y, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({
+            "type": "update", "data": world.get_state(),
+            "events": events
+        })
+    return result
+
+
+@app.get("/warfare/roles")
+async def warfare_roles():
+    """F15: Retorna os papéis táticos atribuídos a cada agente."""
+    return {
+        "roles": {
+            agent.id: {
+                "name": agent.name,
+                "role": world.warfare.agent_roles.get(agent.id),
+                "faction": world.warfare.agent_factions.get(agent.id),
+            }
+            for agent in world.agents
+        },
+        "role_bonuses": world.warfare.ROLE_BONUSES if hasattr(world.warfare, "ROLE_BONUSES") else {},
+    }
+
+
+@app.get("/warfare/territory")
+async def warfare_territory():
+    """F16: Retorna o estado atual do controle de território."""
+    zone = world.entities.get("control_zone_center")
+    return {
+        "territory_holder": world.warfare.territory_holder,
+        "contest_ticks": world.warfare.territory_contest_ticks,
+        "faction_scores": world.warfare.faction_scores,
+        "zone": zone,
+    }

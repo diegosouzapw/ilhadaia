@@ -1330,3 +1330,148 @@ class TestModoGincana:
         assert "gincana" in state
         assert state["gincana"] is not None
         assert "active" in state["gincana"]
+
+
+# ══════════════════════════════════════════════════════════════
+# F13-F16 — Modo Warfare
+# ══════════════════════════════════════════════════════════════
+
+class TestWarfare:
+    def _make_warfare_world(self):
+        from world import World
+        from agent import Agent
+        w = World(size=40, game_mode="warfare")
+        names = [("João", 4, 4), ("Maria", 35, 35), ("Zeca", 4, 35), ("Elly", 35, 4)]
+        for name, x, y in names:
+            ag = Agent(name, "test", x, y)
+            w.add_agent(ag)
+        return w
+
+    def test_warfare_engine_initializes(self):
+        w = self._make_warfare_world()
+        assert w.warfare is not None
+        assert not w.warfare.active
+        assert w.warfare.winner_faction is None
+
+    def test_warfare_start_assigns_factions(self):
+        w = self._make_warfare_world()
+        w.warfare.start(max_ticks=300)
+        assert w.warfare.active
+        for agent in w.agents:
+            assert agent.id in w.warfare.agent_factions
+            assert w.warfare.agent_factions[agent.id] in ["alpha", "beta"]
+
+    def test_warfare_start_assigns_roles(self):
+        w = self._make_warfare_world()
+        w.warfare.start()
+        for agent in w.agents:
+            assert agent.id in w.warfare.agent_roles
+            assert w.warfare.agent_roles[agent.id] in ["scout", "medic", "warrior"]
+
+    def test_warfare_throw_stone_deals_damage(self):
+        w = self._make_warfare_world()
+        w.warfare.start()
+        attacker = w.agents[0]
+        # Coloca inimigo perto do atacante
+        enemy = next(a for a in w.agents if w.warfare.agent_factions.get(a.id) != w.warfare.agent_factions.get(attacker.id))
+        enemy.x = attacker.x + 1
+        enemy.y = attacker.y
+        initial_hp = enemy.hp
+        events = []
+        w.warfare.throw_stone(attacker.id, enemy.x, enemy.y, events)
+        assert enemy.hp < initial_hp
+        assert any("throw_stone" in str(e) for e in events)
+
+    def test_warfare_throw_out_of_range_returns_error(self):
+        w = self._make_warfare_world()
+        w.warfare.start()
+        attacker = w.agents[0]
+        events = []
+        result = w.warfare.throw_stone(attacker.id, 39, 39, events)
+        assert "error" in result
+
+    def test_warfare_territory_capture(self):
+        w = self._make_warfare_world()
+        w.warfare.start()
+        zone = w.entities.get("control_zone_center")
+        if zone is None:
+            # Warfare cria a zona via _get_mode_spawn_objects
+            import pytest
+            pytest.skip("Zona de controle não spawnou (tamanho pequeno)")
+        events = []
+        alpha_agent = next((a for a in w.agents if w.warfare.agent_factions.get(a.id) == "alpha"), None)
+        if not alpha_agent:
+            import pytest
+            pytest.skip("Sem agente alpha")
+        # Posiciona agente alpha na zona central por 3+ ticks
+        alpha_agent.x = zone["x"]
+        alpha_agent.y = zone["y"]
+        for _ in range(4):
+            w.warfare._tick_territory(events)
+        assert w.warfare.territory_holder == "alpha"
+
+    def test_warfare_medic_heals_allies(self):
+        w = self._make_warfare_world()
+        w.warfare.start()
+        # Força um agente a ser medic com aliado próximo ferido
+        medic_agent = w.agents[0]
+        w.warfare.agent_roles[medic_agent.id] = "medic"
+        faction = w.warfare.agent_factions[medic_agent.id]
+        ally = next(a for a in w.agents if w.warfare.agent_factions.get(a.id) == faction and a.id != medic_agent.id)
+        ally.hp = 50
+        ally.x = medic_agent.x + 1
+        ally.y = medic_agent.y
+        # Simula tick onde cura acontece (ticks % 5 == 0)
+        w.ticks = 5
+        events = []
+        w.warfare._tick_roles(events)
+        assert ally.hp > 50
+
+    def test_warfare_stop_returns_winner(self):
+        w = self._make_warfare_world()
+        w.warfare.start(max_ticks=100)
+        w.warfare.faction_scores["alpha"] = 50.0
+        result = w.warfare.stop()
+        assert result["winner_faction"] == "alpha"
+        assert not w.warfare.active
+
+    def test_warfare_state_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/warfare/state")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "warfare" in data
+
+    def test_warfare_territory_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/warfare/territory")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "territory_holder" in data
+            assert "faction_scores" in data
+
+    def test_warfare_start_requires_warfare_mode(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post("/warfare/start",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={})
+            # Modo padrão é survival → 400
+            assert resp.status_code == 400
+
+    def test_get_state_includes_warfare_field_in_warfare_mode(self):
+        from world import World
+        w = World(size=40, game_mode="warfare")
+        state = w.get_state()
+        assert "warfare" in state
+        assert state["warfare"] is not None
+        assert "active" in state["warfare"]
