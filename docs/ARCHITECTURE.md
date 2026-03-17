@@ -1,6 +1,6 @@
-# Arquitetura — BBBia v0.6 (feature-diego)
+# Arquitetura — BBBia v0.8 (feature-diego)
 
-> Estado: **Produção** | Backend: FastAPI 0.111 | Python 3.12 | Março 2026
+> Estado: **Produção** | Backend: FastAPI 0.111 | Python 3.12 | Março 2026 | 174 testes
 
 ---
 
@@ -9,161 +9,155 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                          FRONTEND (Browser)                              │
-│                                                                          │
 │  index.html          dashboard.html        models.html                   │
 │  ├── Three.js 3D     ├── Chart.js          ├── Testar modelos            │
 │  ├── main.js         ├── KPIs ao vivo      ├── Registrar agentes         │
 │  ├── benchmark.js    ├── Scoreboard        └── Inspecionar perfis        │
-│  ├── Nav global      └── Export CSV/JSON                                 │
-│  ├── Sidebar (Replay, Timeline, Benchmark HUD, Atalhos)                  │
-│  └── WebSocket /ws                                                       │
+│  └── WebSocket /ws   └── Export CSV/JSON                                 │
 └────────────────────────────┬─────────────────────────────────────────────┘
                              │ HTTP REST + WebSocket /ws
 ┌────────────────────────────▼─────────────────────────────────────────────┐
 │                       BACKEND (FastAPI + asyncio)                        │
 │                         Porta 8001 | Single Worker                       │
 │                                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────────┐     │
-│  │   World     │  │   Thinker    │  │   TournamentRunner          │     │
-│  │  (Motor)    │  │ (Orquestrador│  │  (auto-lifecycle T20)       │     │
-│  │  20×20 grid │  │  de decisões)│  │  leaderboard + finalize     │     │
-│  └──────┬──────┘  └──────┬───────┘  └─────────────────────────────┘     │
-│         │                │                                                │
-│  ┌──────▼────────────────▼─────────────────────────────────────────┐    │
-│  │                         Agent                                   │    │
-│  │  vitals  inventory  can_think()  token_budget  profile_id       │    │
-│  │  AgentMemory: short_term + episodic + relational + benchmark    │    │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    World (Motor Central)                         │    │
+│  │  grid dinâmico (32×32 → 44×44 por game_mode)                    │    │
+│  │  tick loop → thinker → engines → broadcast WebSocket            │    │
+│  │                                                                  │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │    │
+│  │  │GincanaEngine │  │WarfareEngine │  │   EconomyEngine      │  │    │
+│  │  │ F12          │  │  F13-F16     │  │  F10/F17/F18/F19     │  │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────────────┘  │    │
+│  │  ┌──────────────┐                                               │    │
+│  │  │GangWarEngine │                                               │    │
+│  │  │     F20      │                                               │    │
+│  │  └──────────────┘                                               │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
-│  ┌──────────────┐  ┌────────────────────────────────────────────────┐   │
-│  │   Profiles   │  │         AI Adapters                            │   │
-│  │  7 perfis IA │  │  OpenAICompatibleAdapter (OmniRoute + qualquer │   │
-│  │  (OmniRoute) │  │  endpoint OpenAI-compatible)                   │   │
-│  └──────────────┘  └────────────────┬───────────────────────────────┘   │
-│                                     │ HTTPS                              │
-└─────────────────────────────────────┼────────────────────────────────────┘
-                                      │
+│  ┌──────────────┐  ┌────────────────────┐  ┌──────────────────────┐    │
+│  │   Thinker    │  │  TournamentRunner  │  │  WebhookManager F11  │    │
+│  │ (decisão IA) │  │  (torneios auto)   │  │  (16 tipos + retry)  │    │
+│  └──────────────┘  └────────────────────┘  └──────────────────────┘    │
+└─────────────────────────────────────┬────────────────────────────────────┘
+                                      │ HTTPS
 ┌─────────────────────────────────────▼────────────────────────────────────┐
 │                      PROVIDERS DE IA (via OmniRoute)                     │
-│                                                                          │
-│  OmniRoute  http://192.168.0.15:20128/v1  (ou OMNIROUTER_URL)           │
-│  ├── kr/ → Kiro (Claude Sonnet/Haiku 4.5 — grátis, ilimitado)           │
-│  ├── if/ → iFlow (Kimi K2, Qwen3 — grátis, ilimitado)                   │
-│  ├── gc/ → Gemini CLI (Gemini 2.5 Flash — 180K tok/mês grátis)          │
-│  └── groq/ → Groq API (Llama 3.3 70B, Kimi K2 — 30 RPM grátis)         │
+│  kr/ Kiro │ if/ iFlow │ gc/ Gemini CLI │ groq/ Groq                      │
 └──────────────────────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────▼────────────────────────────────────────────────┐
 │                        STORAGE (SQLite WAL)                              │
-│  backend/data/ilhadaia.db  (não versionado)                              │
-│  ├── sessions          (criação, encerramento, winner)                   │
-│  ├── agent_scores      (scoreboard multi-sessão)                         │
-│  ├── world_settings_history                                              │
-│  ├── agent_memories    (memória persistente entre sessões)               │
-│  └── webhooks          (URLs + eventos + HMAC secret)                    │
-│                                                                          │
-│  backend/logs/*.ndjson         (decision log por sessão)                 │
-│  backend/data/replays/*.ndjson (snapshots a cada 5 ticks)                │
+│  sessions + agent_scores + world_settings_history                        │
+│  agent_memories + webhooks + webhook_deliveries                          │
+│  backend/logs/*.ndjson  (decision log por sessão)                        │
+│  backend/data/replays/*.ndjson  (snapshots a cada 5 ticks)               │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Frontend — 3 Interfaces
+## Modos de Jogo
 
-### `index.html` — Ilha ao Vivo
-- Three.js 3D rendering com OrbitControls
-- WebSocket `/ws` para estado em tempo real
-- `benchmark.js`: HUD de benchmark, replay, modal de agente, timeline de eventos
-- Sidebar direita: atalhos rápidos (Dashboard/Modelos), Benchmark HUD, Timeline, Replay
-- Nav global flutuante com links para as 3 telas
-- Modal `settings-modal` para catálogo de IA (preset auxiliar da UI via `/settings/ai` + `/models`)
-- Botão ⚙️ para abrir catálogo de modelos do OmniRoute dinamicamente
-
-### `dashboard.html` — Análise de Sessões
-- KPIs ao vivo (ticks, sessões, agentes, torneios, rate limit)
-- Gráficos Chart.js: tokens por agente, scores, distribuição de perfis
-- Scoreboard global com filtros
-- Export CSV/JSON de sessões e decisões
-- Nav padronizada (Dashboard ativo em amarelo)
-
-### `models.html` — Gerenciador de Modelos
-- Lista de perfis builtin via `GET /profiles` (sincronizada com backend)
-- Testes de modelo individuais ou em massa com log de latência
-- Tabela de agentes ativos (via WebSocket temporário)
-- Formulário de registro dinâmico — dropdown de perfis vem do backend
-- Nav padronizada (Modelos ativo em roxo)
+| Modo | Grid | Engine | Features |
+|------|------|--------|---------|
+| `survival` | 32×32 | — (World nativo) | Recursos, zumbis, ciclo dia/noite |
+| `gincana` | 32×32 | `GincanaEngine` | F12: checkpoints, artefato, placar, timer |
+| `warfare` | 40×40 | `WarfareEngine` | F13-F16: facções, throw_stone AOE, papéis, território |
+| `economy` | 36×36 | `EconomyEngine` | F10/F17-F19: crafting, trade, mercado, contratos |
+| `gangwar` | 40×40 | `GangWarEngine` | F20: gangues, depósito, sabotagem, black market |
+| `hybrid` | 44×44 | — | Expansão futura |
 
 ---
 
-## Backend — Módulos
+## Engines de Runtime
+
+### `runtime/gincana_engine.py` — F12
+
+- **Checkpoints:** 5 espalhados pelo mapa, 5 pts por captura
+- **Artefato:** pickup + deliver = 20 pts
+- **Timer global:** `max_ticks` configurável (default 400)
+- **Endpoints:** `POST /gincana/start|stop`, `GET /gincana/state|templates`
+
+### `runtime/warfare_engine.py` — F13-F16
+
+- **F13 Facções:** 2 equipes (alpha/beta), `base_hp=100`, `agent.faction`
+- **F14 Arremesso:** `throw_stone()`: dano 15 HP, AOE raio 1, alcance 5 tiles; Warriors auto-disparam
+- **F15 Papéis táticos:** scout (+visão), medic (cura +5 HP aliados/5 ticks), warrior (×1.5 dano)
+- **F16 Território:** zona central → 3 ticks consecutivos → captura → +2 pts/tick
+- **Endpoints:** `POST /warfare/start|stop|throw`, `GET /warfare/state|roles|territory`
+
+### `runtime/economy_engine.py` — F10/F17/F18/F19
+
+- **F10 Crafting:** 5 receitas (`axe`, `raft`, `wall`, `torch`, `bandage`); `craft()` consome ingredientes
+- **F17 Trade P2P:** `trade(seller, buyer, item, price)`; agentes recebem 10 moedas ao `start()`
+- **F18 Mercado:** `market_buy/sell`; `_recalc_prices()`: preços 0.5×–3× base por escassez/excesso
+- **F19 Contratos:** `post_contract` reserva recompensa; `fulfill_contract` paga + `trade_reputation`
+- **Endpoints:** `/economy/*`, `/market/*`
+
+### `runtime/gangwar_engine.py` — F20
+
+- **Gangues:** Alpha/Beta com atribuição automática, `agent.faction`
+- **Depósito compartilhado:** `deposit/withdraw`, capacidade 50 itens por gangue
+- **Sabotagem:** trava depósito inimigo 15 ticks + -1/3 recursos
+- **Supply posts:** captura por presença (raio 2), renda passiva a cada 10 ticks
+- **Black market:** 5 itens exclusivos, preços voláteis ±40% a cada 15 ticks (usa `economy.coins`)
+- **Endpoints:** `POST /gangwar/start|stop|sabotage|depot/deposit|depot/withdraw|bm/buy`, `GET /gangwar/state|depot/{gang}|bm/prices`
+
+---
+
+## Backend — Módulos Core
 
 ### `world.py` — Motor de Simulação
-- Grid 20×20 com BFS pathfinding
-- Ciclo dia/noite, zumbis, desintegração solar
-- Distribuição de turnos por `ai_interval`
-- Broadcast de eventos via WebSocket
-- Campos auxiliares: `ai_provider`, `ai_model`, `omniroute_url` (preset de catálogo da UI)
+
+- Grid dinâmico via `MODE_SIZES` (32 a 44 por `game_mode`)
+- BFS pathfinding, ciclo dia/noite, zumbis, desintegração solar
+- Integra todos os 4 engines: `self.gincana`, `self.warfare`, `self.economy`, `self.gangwar`
+- Engines ficam ativos o tempo todo; `tick()` os ativa condicionalmente por `game_mode`
+- `get_state()` inclui estado do engine ativo no campo correspondente
 
 ### `agent.py` — Agente IA
-- Vitals: hp, hunger, thirst, friendship
+
+- Vitals: `hp`, `hunger`, `thirst`, `friendship`, `faction`, `role`
 - Budget: `token_budget`, `tokens_used`, `cooldown_ticks`, `can_think()`
-- Memória: `AgentMemory` (4 camadas)
-- Benchmark: score, decisions_made, cost_usd, invalid_actions
-- `profile_id` — vincula ao perfil de IA do catálogo
+- Memória: `AgentMemory` (4 camadas: short_term, episodic, relational, benchmark)
+- `profile_id` — vincula ao perfil de IA
 
-### `runtime/profiles.py` — Catálogo de Perfis
-7 perfis builtin, todos via OmniRoute (mesmo endpoint, modelo diferente):
+### `runtime/profiles.py` — Catálogo
 
-| Perfil | Modelo | Provider | Custo |
-|--------|--------|----------|-------|
-| `claude-kiro` ⭐ padrão | `kr/claude-sonnet-4.5` | Kiro | grátis |
-| `claude-haiku` | `kr/claude-haiku-4.5` | Kiro | grátis |
-| `kimi-thinking` | `if/kimi-k2` | iFlow | grátis |
-| `qwen-coder` | `if/qwen3-coder-plus` | iFlow | grátis |
-| `kimi-groq` | `groq/moonshotai/kimi-k2-instruct` | Groq | grátis |
-| `gemini-flash` | `gc/gemini-2.5-flash` | Gemini CLI | grátis |
-| `llama-groq` | `groq/llama-3.3-70b-versatile` | Groq | grátis |
+| Perfil | Modelo | Provider |
+|--------|--------|----------|
+| `claude-kiro` ⭐ | `kr/claude-sonnet-4.5` | Kiro |
+| `claude-haiku` | `kr/claude-haiku-4.5` | Kiro |
+| `kimi-thinking` | `if/kimi-k2` | iFlow |
+| `qwen-coder` | `if/qwen3-coder-plus` | iFlow |
+| `kimi-groq` | `groq/moonshotai/kimi-k2-instruct` | Groq |
+| `gemini-flash` | `gc/gemini-2.5-flash` | Gemini CLI |
+| `llama-groq` | `groq/llama-3.3-70b-versatile` | Groq |
 
-Configuração:
-- `OMNIROUTER_URL` (aliases: `OMNIROUTE_URL`, `OPENAI_BASE_URL`)
-- `OMNIROUTER_API_KEY` (aliases: `OMNIROUTE_API_KEY`, `OPENAI_API_KEY`)
+### `storage/webhook_manager.py` — F11 Webhooks (Expandido)
 
-### `runtime/thinker.py` — Orquestrador
-1. Verifica `can_think()` (budget + cooldown)
-2. Constrói contexto (world state + memória relevante via T21)
-3. Chama `OpenAICompatibleAdapter` com o perfil do agente
-4. Valida resposta com `ActionDecision` (Pydantic)
-5. Atualiza memória e benchmark
-6. Loga decisão em NDJSON
+- **16 tipos de evento:** `agent_dead`, `winner_declared`, `checkpoint_captured`, `artifact_delivered`, `sabotage`, `gangwar_end`, `gincana_end`, `warfare_end`, `contract_fulfilled`, `trade`, `market_buy`, `market_sell` + originais
+- **Retry configurável** por webhook (padrão 3, máx 5) com backoff exponencial (2s→4s→8s)
+- **Tabela `webhook_deliveries`:** persiste status, tentativa, http_code e erro
+- **Endpoints:** `GET /webhooks/admin/history|stats|event-types`
+- **Schema migration:** `_migrate()` para DBs legados
 
-### `runtime/memory.py` — AgentMemory (T10)
-| Camada | Tipo | Limite |
-|--------|------|--------|
-| `short_term` | Ações recentes | deque max 10 |
-| `episodic` | Eventos marcantes | max 50 |
-| `relational` | Opiniões sobre outros agentes | sem limite |
-| `benchmark` | Métricas de performance | dict |
+---
 
-### `runtime/relevance.py` — Busca Episódica (T21)
-- TF-IDF simplificado + pesos por tipo de evento
-- Decaimento temporal exponencial
-- Retorna top-K episódios mais relevantes
-- Sem dependências externas
+## Endpoints por Domínio
 
-### `runtime/tournament_runner.py` — TournamentRunner (T20)
-- Loop assíncrono (a cada 10s)
-- Finaliza automaticamente quando `duration_ticks` é atingido
-- Calcula leaderboard final e dispara webhook `tournament_end`
-
-### `storage/` — Persistência
-| Módulo | Tecnologia | O que armazena |
-|--------|-----------|----------------|
-| `session_store.py` | SQLite WAL | sessões, scores, world_settings |
-| `decision_log.py` | NDJSON | decisões de IA por sessão |
-| `replay_store.py` | NDJSON | snapshots por tick (a cada 5) |
-| `memory_store.py` | SQLite WAL | AgentMemory serializada por owner |
-| `webhook_manager.py` | SQLite WAL | URLs, eventos, fire_count |
+| Domínio | Endpoints |
+|---------|-----------|
+| **World/Agents** | `GET /state`, `POST /reset`, `POST /agents/register`, `GET /agents` |
+| **Gincana F12** | `POST /gincana/start|stop`, `GET /gincana/state|templates` |
+| **Warfare F13-F16** | `POST /warfare/start|stop|throw`, `GET /warfare/state|roles|territory` |
+| **Economy F10/F17-F19** | `GET /economy/state|recipes|coins|contracts|reputation`, `POST /economy/craft|trade|contracts|contracts/fulfill` |
+| **Market F18** | `GET /market/prices`, `POST /market/buy|sell` |
+| **GangWar F20** | `POST /gangwar/start|stop|sabotage|depot/deposit|depot/withdraw|bm/buy`, `GET /gangwar/state|depot/{gang}|bm/prices` |
+| **Webhooks F11** | `POST /webhooks/register|test/{id}`, `GET /webhooks/{owner_id}`, `DELETE /webhooks/{id}`, `GET /webhooks/admin/history|stats|event-types` |
+| **AI Features** | `GET /profiles|models`, `POST /settings/ai`, `GET /settings/ai` |
+| **Torneios** | `POST /tournaments`, `GET /tournaments/{id}` |
 
 ---
 
@@ -185,38 +179,7 @@ tick N
 
 ---
 
-## Endpoints Novos (feature-diego)
-
-| Endpoint | Método | Descrição |
-|----------|--------|-----------|
-| `GET /settings/ai` | GET | Retorna preset auxiliar (provider/modelo/url) da UI |
-| `POST /settings/ai` | POST | Salva preset auxiliar da UI (admin) |
-| `GET /models` | GET | Lista modelos do endpoint OmniRoute dinamicamente |
-| `GET /profiles` | GET | Lista os 7 perfis builtin |
-
----
-
-## Perfis dos 4 NPCs Padrão (feature-diego)
-
-```python
-_default_profiles = ["claude-kiro", "kimi-thinking", "kimi-groq", "claude-haiku"]
-# João → claude-kiro  | Maria → kimi-thinking
-# Zeca → kimi-groq    | Elly  → claude-haiku
-```
-
----
-
-## Resetar Estado Local
-
-```bash
-find backend/data -type f -delete
-find backend/logs -type f -delete
-find backend -maxdepth 1 \( -name 'hall_of_fame.json' -o -name 'world_settings.json' \) -delete
-```
-
----
-
-## Rate Limiting (T18)
+## Rate Limiting
 
 | Endpoint | Limite |
 |----------|--------|
@@ -233,8 +196,7 @@ fastapi, uvicorn    # Framework web + ASGI
 pydantic            # Validação de schemas
 python-dotenv       # Config por env
 openai              # Adapter OpenAI-compatible (OmniRoute)
-google-genai        # Planejado p/ adapter Gemini nativo (ainda não usado no backend)
 slowapi             # Rate limiting
 httpx               # HTTP async (webhooks + /models proxy)
-pytest              # Testes unitários (33 casos)
+pytest              # 174 testes automatizados
 ```

@@ -1,6 +1,19 @@
 # Plano de Features e Melhorias — BBBia
 
-> Estado: Proposta | Base: `main` apos merge da `feature-diego` | Marco 2026
+> Estado: **✅ IMPLEMENTADO** | Base: `main` | Março 2026 | 174 testes passando
+
+## Status de Implementação
+
+| Fase | Features | Status | Engine |
+|------|---------|--------|--------|
+| Fase 1 | F01 Comandante, F03 Inspector, F05 Console | ✅ Completo | World nativo |
+| Fase 2 | F02 A/B, F06 ELO, F09 Perfis | ✅ Completo | World nativo |
+| Fase 3 | F04 Eventos, F07 Reputação, F08 Missões | ✅ Completo | World nativo |
+| Fase 4 | F12 Gincana | ✅ Completo | `GincanaEngine` |
+| Fase 5 | F13-F16 Warfare | ✅ Completo | `WarfareEngine` |
+| Fase 6 | F10, F17-F19 Economy | ✅ Completo | `EconomyEngine` |
+| Fase 7 | F20 Guerra de Gangues | ✅ Completo | `GangWarEngine` |
+| Fase 8 | F11 Webhooks Expandidos | ✅ Completo | `WebhookManager` |
 
 ---
 
