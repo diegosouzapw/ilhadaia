@@ -152,6 +152,7 @@ ilhadaia/
 - `docs/DEVELOPMENT_GUIDE.md`: setup local, testes e extensoes
 - `docs/GAME_STATE.md`: detalhes de simulacao, score e world state
 - `docs/IMPROVEMENT_PLAN.md`: historico de implementacao e ajustes da branch
+- `docs/FEATURE_PLAN.md`: roadmap de features, modos de jogo e melhorias priorizadas
 - `docs/BACKLOG.md`: pendencias tecnicas reais
 - `docs/CURRENT_STATE_AUDIT.md`: fotografia atual do projeto apos validacao
 - `docs/TARGET_ARCHITECTURE.md`: direcao de modularizacao futura

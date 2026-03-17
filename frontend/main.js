@@ -1,15 +1,19 @@
 // BBB IA - Frontend 3D Engine
-const WORLD_SIZE = 20;
+const worldSizeParam = new URLSearchParams(window.location.search).get('world_size');
+const WORLD_SIZE = Number.parseInt(worldSizeParam || localStorage.getItem('bbb_world_size') || '32', 10);
 const TILE_SIZE = 2; // Size of each grid block in 3D units
+const WORLD_CAMERA_HEIGHT = Math.max(30, Math.floor(WORLD_SIZE * 1.1));
+const WORLD_CAMERA_DISTANCE = Math.max(10, Math.floor(WORLD_SIZE * 0.6));
+const WORLD_FOG_FAR = Math.max(80, WORLD_SIZE * TILE_SIZE * 2.5);
 
 // Scene Setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB); // Sky
-scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+scene.fog = new THREE.Fog(0x87CEEB, 20, WORLD_FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
 // Start high up looking down (God View)
-camera.position.set(WORLD_SIZE, 30, WORLD_SIZE + 10);
+camera.position.set(WORLD_SIZE, WORLD_CAMERA_HEIGHT, WORLD_SIZE + WORLD_CAMERA_DISTANCE);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -24,15 +28,16 @@ const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(20, 40, 20);
+dirLight.position.set(WORLD_SIZE, Math.max(40, WORLD_SIZE * 2), WORLD_SIZE);
 dirLight.castShadow = true;
 // Enhance shadow quality
 dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
-dirLight.shadow.camera.left = -30;
-dirLight.shadow.camera.right = 30;
-dirLight.shadow.camera.top = 30;
-dirLight.shadow.camera.bottom = -30;
+const SHADOW_HALF_SPAN = Math.max(30, Math.floor(WORLD_SIZE * 1.6));
+dirLight.shadow.camera.left = -SHADOW_HALF_SPAN;
+dirLight.shadow.camera.right = SHADOW_HALF_SPAN;
+dirLight.shadow.camera.top = SHADOW_HALF_SPAN;
+dirLight.shadow.camera.bottom = -SHADOW_HALF_SPAN;
 scene.add(dirLight);
 
 // Materials
@@ -1434,7 +1439,7 @@ function applyCameraMode(save = true) {
     if (isFixedCamera) {
         // Redundant but keeping structure
         controls.enabled = false;
-        camera.position.set(WORLD_SIZE, 30, WORLD_SIZE + 10);
+        camera.position.set(WORLD_SIZE, WORLD_CAMERA_HEIGHT, WORLD_SIZE + WORLD_CAMERA_DISTANCE);
         controls.target.set(WORLD_SIZE, 0, WORLD_SIZE);
         camera.lookAt(WORLD_SIZE, 0, WORLD_SIZE);
     } else {

@@ -9,9 +9,10 @@ from typing import Optional, List, Dict, Any
 logger = logging.getLogger("BBB_IA")
 
 class World:
-    def __init__(self, size=20):
+    def __init__(self, size=None):
         # Initialize world state with grid size
-        self.size = size
+        self.size = self._resolve_world_size(size)
+        self._configure_landmarks()
         self.ticks = 0
         self.started = False # T14: Game only ticks when started
         self.game_over = False
@@ -59,6 +60,52 @@ class World:
         self.DAY_CYCLE = 120
         self._was_night = False  # Track night transitions for zombie conversion
         self._load_history()
+
+    def _resolve_world_size(self, size) -> int:
+        if size is None:
+            size_env = os.getenv("WORLD_SIZE", "32").strip()
+            try:
+                size = int(size_env)
+            except ValueError:
+                logger.warning("Invalid WORLD_SIZE=%s. Falling back to 32.", size_env)
+                size = 32
+        try:
+            parsed = int(size)
+        except (TypeError, ValueError):
+            parsed = 32
+        # Keep minimum safe size to preserve pathing landmarks and home spacing.
+        return max(20, parsed)
+
+    def _configure_landmarks(self) -> None:
+        margin = max(2, min(4, self.size // 8))
+        opposite = self.size - margin - 1
+        if opposite <= margin:
+            margin = 1
+            opposite = self.size - 2
+
+        self.house_positions = [
+            (margin, margin),
+            (opposite, opposite),
+            (opposite, margin),
+            (margin, opposite),
+        ]
+        self.house_by_name = {
+            "João": self.house_positions[0],
+            "Maria": self.house_positions[1],
+            "Zeca": self.house_positions[2],
+            "Elly": self.house_positions[3],
+        }
+
+        center = self.size // 2
+        self.pond_center_x = center
+        self.pond_center_y = center
+        self.pond_radius = max(3, self.size // 8)
+        self.pond_radius_sq = self.pond_radius ** 2
+        self.tree_min_distance_sq = (self.pond_radius + 2) ** 2
+
+        self.cemetery_x = max(3, self.size - 5)
+        self.cemetery_y = max(3, self.size // 4)
+        self.house_shelter_radius = 2
 
     def set_ai_decider(self, ai_decider) -> None:
         """Injecta um orquestrador de decisão (ex.: Thinker) para o loop de IA."""
@@ -113,38 +160,41 @@ class World:
             logger.error(f"Error saving history/settings: {e}")
 
     def _init_map(self):
-        # A simple grid representation could be kept here, 
-        # or just relying on entities with x,y coords.
         logger.info(f"Initialized world map {self.size}x{self.size}")
+
+        door_tiles = set()
+        for (hx, hy), name in zip(self.house_positions, ["João", "Maria", "Zeca", "Elly"]):
+            if name == "João":
+                door = (hx, hy + 1)
+            elif name == "Maria":
+                door = (hx + 1, hy)
+            elif name == "Zeca":
+                door = (hx, hy - 1)
+            else:
+                door = (hx - 1, hy)
+            if 0 <= door[0] < self.size and 0 <= door[1] < self.size:
+                door_tiles.add(door)
+
         for x in range(self.size):
             for y in range(self.size):
-                # Central area for the pond (circle approx radius 2.5 around 10,10)
-                dist_to_center = (x - 10)**2 + (y - 10)**2
-                if dist_to_center <= 7:
-                    eid = f"water_{x}_{y}"
-                    self.add_entity(eid, {"type": "water", "x": x, "y": y})
+                dist_to_center = (x - self.pond_center_x) ** 2 + (y - self.pond_center_y) ** 2
+                if dist_to_center <= self.pond_radius_sq:
+                    self.add_entity(f"water_{x}_{y}", {"type": "water", "x": x, "y": y})
                     continue
 
-                # Skip front of house doors
-                # Joao (2,2) door at (2,3)
-                # Maria (17,17) door at (18,17)
-                # Zeca (17,2) door at (17,1)
-                # Ana (2,17) door at (1,17)
-                if (x == 2 and y == 3) or (x == 18 and y == 17) or (x == 17 and y == 1) or (x == 1 and y == 17):
+                if (x, y) in door_tiles:
                     continue
 
-                # 2% chance of stone (reduced)
                 if random.random() < 0.02:
                     self.add_entity(f"stone_{x}_{y}", {"type": "stone", "x": x, "y": y})
-                # 1% chance of tree (reduced) — NOT within 2 tiles of the lake!
-                elif random.random() < 0.01 and dist_to_center > 20:
+                elif random.random() < 0.01 and dist_to_center > self.tree_min_distance_sq:
                     self.add_entity(f"tree_{x}_{y}", {"type": "tree", "x": x, "y": y, "fruit_stage": 3})
-        # Fixed landmarks
-        self.add_entity("house_joao", {"type": "house", "x": 2, "y": 2, "name": "Casa do João"})
-        self.add_entity("house_maria", {"type": "house", "x": 17, "y": 17, "name": "Casa da Maria"})
-        self.add_entity("house_zeca", {"type": "house", "x": 17, "y": 2, "name": "Casa do Zeca"})
-        self.add_entity("house_elly", {"type": "house", "x": 2, "y": 17, "name": "Casa da Elly"})
-        self.add_entity("cemetery_area", {"type": "cemetery", "x": 15, "y": 5, "name": "Cemitério da Ilha"})
+
+        self.add_entity("house_joao", {"type": "house", "x": self.house_positions[0][0], "y": self.house_positions[0][1], "name": "Casa do João"})
+        self.add_entity("house_maria", {"type": "house", "x": self.house_positions[1][0], "y": self.house_positions[1][1], "name": "Casa da Maria"})
+        self.add_entity("house_zeca", {"type": "house", "x": self.house_positions[2][0], "y": self.house_positions[2][1], "name": "Casa do Zeca"})
+        self.add_entity("house_elly", {"type": "house", "x": self.house_positions[3][0], "y": self.house_positions[3][1], "name": "Casa da Elly"})
+        self.add_entity("cemetery_area", {"type": "cemetery", "x": self.cemetery_x, "y": self.cemetery_y, "name": "Cemitério da Ilha"})
 
     def add_entity(self, entity_id: str, data: dict):
         self.entities[entity_id] = data
@@ -235,8 +285,8 @@ class World:
                 if getattr(agent, 'is_zombie', False):
                     # Check if zombie is safely inside a house
                     is_safe_inside = False
-                    for hx, hy in [(2,2), (17,17), (17,2), (2,17)]:
-                        if abs(agent.x - hx) + abs(agent.y - hy) <= 2:
+                    for hx, hy in self.house_positions:
+                        if abs(agent.x - hx) + abs(agent.y - hy) <= self.house_shelter_radius:
                             is_safe_inside = True
                             break
                     
@@ -318,13 +368,10 @@ class World:
                     
                 # Check Night Cold Damage
                 if is_night_now:
-                    home_x, home_y = 2, 2
-                    if agent.name == "Maria": home_x, home_y = 17, 17
-                    elif agent.name == "Zeca": home_x, home_y = 17, 2
-                    elif agent.name not in ["João", "Maria", "Zeca"]: home_x, home_y = 2, 17 # Elly/Carla
-                    
+                    home_x, home_y = self.house_by_name.get(agent.name, self.house_positions[3])
+
                     dist_to_home = abs(agent.x - home_x) + abs(agent.y - home_y)
-                    if dist_to_home > 2:
+                    if dist_to_home > self.house_shelter_radius:
                         agent.hp -= 2
                         if self.ticks % 5 == 0:
                             events.append({"agent_id": agent.id, "action": "busy", "name": agent.name, "event_msg": "está congelando de frio lá fora! Preciso ir pra casa! 🥶"})
@@ -517,7 +564,7 @@ class World:
 
         # 4. Auto Bury if at cemetery
         if carried_body and "dead_body" in agent.inventory:
-            if abs(agent.x - 15) <= 2 and abs(agent.y - 5) <= 2:
+            if abs(agent.x - self.cemetery_x) <= 2 and abs(agent.y - self.cemetery_y) <= 2:
                 carried_body.is_buried = True
                 carried_body.carried_by = None
                 agent.held_item = None
@@ -814,7 +861,7 @@ class World:
                  action_event["event_msg"] = "TENTOU BEBER mas não tem garrafa d'água na bolsa! Vá ao lago e use 'fill_bottle'."
 
         elif act_type == "die":
-            action_event["event_msg"] = "MORREU E CAIU NO CHÃO! 💀. Alguém precisa levá-lo ao cemitério (15,5)!"
+            action_event["event_msg"] = f"MORREU E CAIU NO CHÃO! 💀. Alguém precisa levá-lo ao cemitério ({self.cemetery_x},{self.cemetery_y})!"
             logger.warning(f"DEATH: {agent.name} is down at {agent.x},{agent.y}")
             # Ensure entity is marked as dead immediately for AI visibility
             if agent.id in self.entities:
@@ -875,7 +922,7 @@ class World:
             # Check if carrying a body and at cemetery area (radius 2 for tolerance)
             carried_body = next((a for a in self.agents if a.carried_by == agent.id), None)
             if carried_body:
-                if abs(agent.x - 15) <= 2 and abs(agent.y - 5) <= 2:
+                if abs(agent.x - self.cemetery_x) <= 2 and abs(agent.y - self.cemetery_y) <= 2:
                     carried_body.is_buried = True
                     carried_body.carried_by = None
                     agent.held_item = None
@@ -916,7 +963,7 @@ class World:
                         self.add_pending_agent(new_agent, 10)
                         action_event["event_msg"] += f" | UM NOVO SOBREVIVENTE ({name}) CHEGARÁ EM 10 SEGUNDOS!"
                 else:
-                    action_event["event_msg"] = "TENTOU ENTERRAR mas não está no Cemitério (15,5)!"
+                    action_event["event_msg"] = f"TENTOU ENTERRAR mas não está no Cemitério ({self.cemetery_x},{self.cemetery_y})!"
             else:
                 action_event["event_msg"] = "TENTOU ENTERRAR mas não está carregando ninguém."
 
@@ -1056,10 +1103,10 @@ class World:
         # Possible Initial Squad
         # Possible Initial Squad with fixed IDs
         squad = [
-            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", 2, 2, agent_id="sys_joao"),
-            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", 17, 17, agent_id="sys_maria"),
-            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", 17, 2, agent_id="sys_zeca"),
-            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", 2, 17, agent_id="sys_elly")
+            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", self.house_positions[0][0], self.house_positions[0][1], agent_id="sys_joao"),
+            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", self.house_positions[1][0], self.house_positions[1][1], agent_id="sys_maria"),
+            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", self.house_positions[2][0], self.house_positions[2][1], agent_id="sys_zeca"),
+            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", self.house_positions[3][0], self.house_positions[3][1], agent_id="sys_elly")
         ]
 
         # Atribui um perfil de IA diferente para cada personagem default
