@@ -300,8 +300,8 @@ async def world_loop():
                             session_store.upsert_agent_score(_current_session_id, agent)
                             if getattr(agent, "owner_id", ""):
                                 memory_store.save(agent)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.error(f"Error persisting score for agent {agent.name}: {e}")
                     # Snapshot de replay
                     replay_store.maybe_snapshot(world.ticks, world.get_state())
 
@@ -731,16 +731,28 @@ async def register_agent(request: Request, reg: AgentRegistration):
 @app.get("/agents/all")
 async def get_all_agents():
     """
-    Retorna a lista completa de agentes:
-    1. Agentes ativos no mundo (vivos ou zumbis).
-    2. Agentes históricos salvos no memory_store (inativos).
+    Retorna a lista completa de agentes organizada por:
+    1. NPCs Ativos (João, Maria, etc. que estão no mundo)
+    2. NPCs Potenciais/Inativos (System default + Extra names que não estão no mundo)
+    3. Agentes de Usuário (Registrados via API)
     """
-    active_agents = []
-    seen_keys = set()
+    # 1. Definir NPCs do Sistema (Fixos + Extras)
+    system_npcs = ["João", "Maria", "Zeca", "Elly"]
+    extra_npcs = [name for name, _ in world.extra_names]
+    all_npc_names = set(system_npcs + extra_npcs)
     
-    # 1. Agentes Ativos
+    active_npcs_list = []
+    potential_npcs_list = []
+    user_agents_list = []
+    
+    seen_npc_names = set()
+    seen_user_keys = set() # (owner_id, name)
+    
+    # --- 1. Processar Agentes Ativos no Mundo ---
     for a in world.agents:
-        active_agents.append({
+        is_npc = a.name in all_npc_names and not getattr(a, "owner_id", "")
+        
+        agent_data = {
             "id": a.id,
             "name": a.name,
             "owner_id": getattr(a, "owner_id", ""),
@@ -752,21 +764,55 @@ async def get_all_agents():
             "token_budget": getattr(a, "token_budget", 10000),
             "benchmark": getattr(a, "benchmark", {}),
             "status": "active" if a.is_alive else "dead"
-        })
-        # Chave para de-duplicação: (owner_id, name)
-        seen_keys.add((getattr(a, "owner_id", ""), a.name))
+        }
+        
+        if is_npc:
+            active_npcs_list.append(agent_data)
+            seen_npc_names.add(a.name)
+        else:
+            user_agents_list.append(agent_data)
+            seen_user_keys.add((getattr(a, "owner_id", ""), a.name))
 
-    # 2. Agentes Inativos (da memória)
+    # --- 2. Processar NPCs Potenciais (que ainda não entraram ou estão inativos) ---
+    for name in all_npc_names:
+        if name not in seen_npc_names:
+            # Tentar ver se tem memória desse NPC para pegar o profile_id real
+            sys_id = None
+            if name == "João": sys_id = "sys_joao"
+            elif name == "Maria": sys_id = "sys_maria"
+            elif name == "Zeca": sys_id = "sys_zeca"
+            elif name == "Elly": sys_id = "sys_elly"
+            
+            profile_id = "claude-kiro" # fallback
+            if sys_id and sys_id in world.system_agent_overrides:
+                profile_id = world.system_agent_overrides[sys_id]
+            
+            potential_npcs_list.append({
+                "id": sys_id or f"potential_{name.lower()}",
+                "name": name,
+                "owner_id": "",
+                "profile_id": profile_id,
+                "hp": 0,
+                "is_alive": False,
+                "is_zombie": False,
+                "tokens_used": 0,
+                "token_budget": 0,
+                "benchmark": {},
+                "status": "potential"
+            })
+
+    # --- 3. Processar Agentes de Usuário da Memória (Inativos) ---
     all_registered = memory_store.list_agents_with_memory()
     for reg in all_registered:
-        key = (reg["owner_id"], reg["agent_name"])
-        if key not in seen_keys:
-            # Tentar carregar o perfil para ter o modelo correto
-            # Nota: Agentes históricos não tem um ID de instância ativo, usamos um placeholder
-            active_agents.append({
-                "id": f"historic_{reg['owner_id']}||{reg['agent_name']}",
-                "name": reg["agent_name"],
-                "owner_id": reg["owner_id"],
+        owner_id = reg["owner_id"]
+        name = reg["agent_name"]
+        key = (owner_id, name)
+        
+        if owner_id != "" and key not in seen_user_keys:
+            user_agents_list.append({
+                "id": f"historic_{owner_id}||{name}",
+                "name": name,
+                "owner_id": owner_id,
                 "profile_id": reg.get("profile_id", "unknown"),
                 "hp": 0,
                 "is_alive": False,
@@ -777,9 +823,12 @@ async def get_all_agents():
                 "status": "inactive",
                 "last_seen": reg["updated_at"]
             })
-            seen_keys.add(key)
-            
-    return {"agents": active_agents}
+            seen_user_keys.add(key)
+
+    # Combinar tudo na ordem solicitada: Ativos NPC -> Potenciais NPC -> Agentes Usuário
+    final_list = active_npcs_list + potential_npcs_list + user_agents_list
+    
+    return {"agents": final_list}
 
 
 @app.get("/agents/{agent_id}/state")
@@ -986,6 +1035,13 @@ async def update_agent_profile(agent_id: str, up: AgentProfileUpdate):
                 return {"status": "Historical agent profile updated", "agent_id": agent_id, "profile_id": up.profile_id}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Erro ao atualizar memória: {e}")
+
+    # Caso 3: NPCs Potenciais (não ativos no momento)
+    if agent_id.startswith("sys_") or agent_id.startswith("potential_"):
+        # Salvar o override no mundo
+        world.system_agent_overrides[agent_id] = up.profile_id
+        world._save_history()
+        return {"status": "Potential NPC profile updated", "agent_id": agent_id, "profile_id": up.profile_id}
 
     raise HTTPException(status_code=404, detail="Agente não encontrado")
 

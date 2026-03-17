@@ -25,11 +25,15 @@
       --glow:     0 0 20px rgba(108,99,255,.25);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      overflow: auto !important;
+      height: auto !important;
+      min-height: 100vh;
+    }
     body {
       font-family: 'Inter', sans-serif;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
       padding: 0 0 60px;
     }
 

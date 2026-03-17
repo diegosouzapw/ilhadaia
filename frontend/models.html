@@ -26,11 +26,15 @@
       --glow:    0 0 24px rgba(124,111,255,.3);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      overflow: auto !important;
+      height: auto !important;
+      min-height: 100vh;
+    }
     body {
       font-family: 'Inter', sans-serif;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
     }
 
     /* ── Header ── */
@@ -936,19 +940,20 @@ function renderAgents(agents) {
   document.getElementById('kpi-active-agents').textContent = agents.filter(a => a.is_alive).length;
 
   tb.innerHTML = agents.map(a => {
-    const isInactive = a.status === 'inactive';
+    const isInactive = a.status === 'inactive' || a.status === 'potential';
     const hp = a.hp ?? 0;
     const hpClass = hp > 60 ? '' : hp > 30 ? 'mid' : 'low';
     
     let dotClass = 'off';
     if (a.is_alive) dotClass = a.is_zombie ? 'zombie' : 'on';
-    if (isInactive) dotClass = 'off'; // Ou criar uma classe 'inactive' se preferir
+    if (isInactive) dotClass = 'off'; 
 
     const tokPct = a.token_budget > 0 ? Math.round(a.tokens_used / a.token_budget * 100) : 0;
     
-    // Estilo para linha inativa
-    const rowStyle = isInactive ? 'opacity: 0.6; filter: grayscale(0.5);' : '';
-    const statusText = isInactive ? '<span style="font-size:0.7rem;color:var(--muted)">[Inativo]</span>' : '';
+    // Estilo para linha inativa/potencial
+    const rowStyle = isInactive ? 'opacity: 0.65; filter: grayscale(0.3);' : '';
+    const statusText = a.status === 'inactive' ? '<span style="font-size:0.7rem;color:var(--muted)">[Histórico]</span>' : 
+                       a.status === 'potential' ? '<span style="font-size:0.7rem;color:var(--accent2)">[Potencial]</span>' : '';
 
     return `<tr data-id="${a.id}" style="${rowStyle}">
       <td><span class="alive-dot ${dotClass}"></span></td>

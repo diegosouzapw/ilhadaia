@@ -113,11 +113,23 @@ class Thinker:
         is_invalid = response.action != decision.action  # action foi corrigida para wait?
 
         # 6. Atualizar estado do agente
-        agent.tokens_used += response.total_tokens
+        tokens_delta = response.total_tokens
+        agent.tokens_used += tokens_delta
         agent.last_thought_tick = current_tick
         agent.benchmark["decisions_made"] += 1
+        
+        # Cálculo de custo (estimado $0.002 / 1k tokens)
+        cost_delta = (tokens_delta / 1000.0) * 0.002
+        agent.benchmark["cost_usd"] = agent.benchmark.get("cost_usd", 0.0) + cost_delta
+        
+        # Cálculo de score (decisão válida = 1.0, tokens dão mini-bonus de atividade)
+        score_delta = 1.0 if not is_invalid else 0.1
+        agent.benchmark["score"] = agent.benchmark.get("score", 0.0) + score_delta
+
         if is_invalid:
             agent.benchmark["invalid_actions"] += 1
+
+        logger.info(f"[{agent.name}] AI logic: tokens={tokens_delta}, cost=${cost_delta:.5f}, score_delta={score_delta}")
 
         # 7. Atualizar memória 4 camadas (T10)
         agent_memory = getattr(agent, "agent_memory", None)

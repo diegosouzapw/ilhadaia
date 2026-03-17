@@ -251,6 +251,11 @@ class World:
                             name, personality = self.extra_names[self.spawn_index % len(self.extra_names)]
                             self.spawn_index += 1
                             new_agent = self.agent_class(name, personality, random.randint(0, self.size-1), random.randint(0, self.size-1))
+                            # T16+: Aplicar override de perfil se existir
+                            pot_id = f"potential_{name.lower()}"
+                            if pot_id in self.system_agent_overrides:
+                                new_agent.profile_id = self.system_agent_overrides[pot_id]
+                            
                             self.add_pending_agent(new_agent, 10)
                             events.append({"action": "busy", "event_msg": f"⏳ UM NOVO SOBREVIVENTE ({name}) CHEGARÁ EM 10 SEGUNDOS para substituir o zumbi!"})
 
@@ -287,6 +292,11 @@ class World:
             for agent in self.agents:
                 if not agent.is_alive:
                     continue
+                
+                # Update survival benchmark
+                if "ticks_survived" not in agent.benchmark:
+                    agent.benchmark["ticks_survived"] = 0
+                agent.benchmark["ticks_survived"] += 1
                 # Skip zombies from normal vitals processing but track their survival
                 if getattr(agent, 'is_zombie', False):
                     agent.zombie_ticks = getattr(agent, 'zombie_ticks', 0) + 1
