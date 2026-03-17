@@ -1985,3 +1985,129 @@ class TestGuerraDeGangues:
         assert "gangwar" in state
         assert state["gangwar"] is not None
         assert "gang_scores" in state["gangwar"]
+
+
+# ══════════════════════════════════════════════════════════════
+# F11 — Webhooks Expandidos
+# ══════════════════════════════════════════════════════════════
+
+class TestWebhooksExpandidos:
+    def _make_manager(self, tmp_path=None):
+        import tempfile, os
+        from storage.webhook_manager import WebhookManager
+        db = tempfile.mktemp(suffix=".db")
+        return WebhookManager(db_path=db)
+
+    def test_valid_events_includes_f11_types(self):
+        from storage.webhook_manager import VALID_EVENTS
+        required = {"session_start", "session_end", "agent_dead", "winner_declared",
+                    "checkpoint_captured", "artifact_delivered", "sabotage",
+                    "gangwar_end", "gincana_end", "warfare_end",
+                    "contract_fulfilled", "trade", "market_buy", "market_sell"}
+        assert required.issubset(VALID_EVENTS)
+
+    def test_register_webhook_with_max_retries(self):
+        wm = self._make_manager()
+        result = wm.register("owner1", "http://example.com/hook",
+                             ["agent_dead", "trade"], max_retries=3)
+        assert result["max_retries"] == 3
+        assert "agent_dead" in result["events"]
+        wm.close()
+
+    def test_register_clamps_max_retries_to_5(self):
+        wm = self._make_manager()
+        result = wm.register("owner1", "http://example.com/hook",
+                             ["all"], max_retries=99)
+        assert result["max_retries"] == 5
+        wm.close()
+
+    def test_delivery_history_empty_initially(self):
+        wm = self._make_manager()
+        history = wm.get_delivery_history()
+        assert history == []
+        wm.close()
+
+    def test_delivery_stats_zero_initially(self):
+        wm = self._make_manager()
+        stats = wm.get_delivery_stats()
+        assert stats["total_attempts"] == 0
+        assert stats["success"] == 0
+        assert stats["failures"] == 0
+        wm.close()
+
+    def test_log_delivery_creates_record(self):
+        wm = self._make_manager()
+        wid = "test_wh_001"
+        wm._log_delivery(wid, "agent_dead", 1, "ok", 200, None)
+        history = wm.get_delivery_history()
+        assert len(history) == 1
+        assert history[0]["event_type"] == "agent_dead"
+        assert history[0]["status"] == "ok"
+        assert history[0]["http_code"] == 200
+        wm.close()
+
+    def test_log_delivery_fail_record(self):
+        wm = self._make_manager()
+        wm._log_delivery("wh_001", "trade", 3, "fail", None, "timeout")
+        history = wm.get_delivery_history()
+        assert history[0]["status"] == "fail"
+        assert history[0]["error"] == "timeout"
+        wm.close()
+
+    def test_delivery_stats_after_deliveries(self):
+        wm = self._make_manager()
+        wm._log_delivery("wh1", "agent_dead", 1, "ok", 200, None)
+        wm._log_delivery("wh1", "trade", 1, "ok", 200, None)
+        wm._log_delivery("wh2", "sabotage", 2, "fail", None, "error")
+        stats = wm.get_delivery_stats()
+        assert stats["total_attempts"] == 3
+        assert stats["success"] == 2
+        assert stats["failures"] == 1
+        assert stats["success_rate"] == pytest.approx(66.7, abs=0.1)
+        wm.close()
+
+    def test_webhooks_events_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/webhooks/admin/event-types")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "valid_events" in data
+            assert "agent_dead" in data["valid_events"]
+            assert "gangwar_end" in data["valid_events"]
+
+    def test_webhooks_stats_endpoint_accessible(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        with TestClient(main.app) as client:
+            resp = client.get("/webhooks/admin/stats",
+                              headers={"X-Admin-Token": main.ADMIN_TOKEN})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "total_attempts" in data
+
+    def test_webhooks_stats_endpoint_with_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        with TestClient(main.app) as client:
+            resp = client.get("/webhooks/admin/stats",
+                              headers={"X-Admin-Token": main.ADMIN_TOKEN})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "total_attempts" in data
+            assert "success_rate" in data
+
+    def test_webhooks_history_endpoint_accessible(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        with TestClient(main.app) as client:
+            resp = client.get("/webhooks/admin/history",
+                              headers={"X-Admin-Token": main.ADMIN_TOKEN})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "deliveries" in data

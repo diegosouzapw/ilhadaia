@@ -266,23 +266,54 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def _dispatch_webhooks_from_events(events: list[dict]) -> None:
-    """Dispara webhooks para eventos críticos sem impactar o game loop."""
+    """F11: Dispara webhooks para eventos críticos (expandido com 16 tipos)."""
     tasks = []
     for event in events:
-        action = event.get("action")
-        if action == "die":
-            tasks.append(webhook_manager.fire_event("death", {
-                "agent_id": event.get("agent_id", ""),
-                "agent_name": event.get("name", ""),
-                "tick": world.ticks,
-                "event_msg": event.get("event_msg", ""),
-            }))
+        action = event.get("action", "")
+        base = {
+            "agent_id": event.get("agent_id", ""),
+            "agent_name": event.get("name", ""),
+            "tick": world.ticks,
+            "event_msg": event.get("event_msg", ""),
+            "game_mode": world.game_mode,
+        }
+        # Eventos originais
+        if action in ("die", "death"):
+            tasks.append(webhook_manager.fire_event("agent_dead", base))
         elif action == "zombie":
-            tasks.append(webhook_manager.fire_event("zombie", {
-                "agent_id": event.get("agent_id", ""),
-                "agent_name": event.get("name", ""),
-                "tick": world.ticks,
-                "event_msg": event.get("event_msg", ""),
+            tasks.append(webhook_manager.fire_event("zombie", base))
+        # F04 — Eventos dinâmicos / F12 — Gincana / F13-F16 — Warfare / F20 — GangWar
+        elif action == "checkpoint_captured":
+            tasks.append(webhook_manager.fire_event("checkpoint_captured", base))
+        elif action == "artifact_delivered":
+            tasks.append(webhook_manager.fire_event("artifact_delivered", base))
+        elif action == "gincana_end":
+            tasks.append(webhook_manager.fire_event("gincana_end", {
+                **base, "gincana": world.gincana.get_state()
+            }))
+        elif action == "warfare_end":
+            tasks.append(webhook_manager.fire_event("warfare_end", {
+                **base, "warfare": world.warfare.get_state()
+            }))
+        elif action == "gangwar_end":
+            tasks.append(webhook_manager.fire_event("gangwar_end", {
+                **base, "gangwar": world.gangwar.get_state()
+            }))
+        elif action == "sabotage":
+            tasks.append(webhook_manager.fire_event("sabotage", base))
+        # F17 — Trade / F18 — Mercado / F19 — Contratos
+        elif action == "trade":
+            tasks.append(webhook_manager.fire_event("trade", base))
+        elif action == "market_buy":
+            tasks.append(webhook_manager.fire_event("market_buy", base))
+        elif action == "market_sell":
+            tasks.append(webhook_manager.fire_event("market_sell", base))
+        elif action == "contract_fulfilled":
+            tasks.append(webhook_manager.fire_event("contract_fulfilled", base))
+        # Genérico: winner_declared
+        elif action in ("win", "winner_declared"):
+            tasks.append(webhook_manager.fire_event("winner_declared", {
+                **base, "winner": event.get("agent_id")
             }))
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -2442,3 +2473,28 @@ async def gangwar_bm_prices():
         "stock": world.gangwar.bm_stock,
         "items": world.gangwar.BLACK_MARKET_ITEMS if hasattr(world.gangwar, 'BLACK_MARKET_ITEMS') else list(world.gangwar.bm_prices),
     }
+
+# ── F11 — Webhooks: Histórico e Estatísticas ─────────────────────────────────
+
+@app.get("/webhooks/admin/history")
+async def webhooks_history(
+    webhook_id: Optional[str] = None,
+    limit: int = 50,
+    _: None = Depends(verify_admin_token)
+):
+    """F11: Retorna histórico de entregas de webhooks (admin). Filtrável por webhook_id."""
+    history = webhook_manager.get_delivery_history(webhook_id=webhook_id, limit=limit)
+    return {"count": len(history), "deliveries": history}
+
+
+@app.get("/webhooks/admin/stats")
+async def webhooks_stats(_: None = Depends(verify_admin_token)):
+    """F11: Retorna estatísticas gerais de disparo de webhooks (admin)."""
+    return webhook_manager.get_delivery_stats()
+
+
+@app.get("/webhooks/admin/event-types")
+async def webhooks_events():
+    """F11: Lista todos os tipos de evento suportados para registro de webhooks."""
+    from storage.webhook_manager import VALID_EVENTS
+    return {"valid_events": sorted(VALID_EVENTS)}
