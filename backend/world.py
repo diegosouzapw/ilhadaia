@@ -5,6 +5,7 @@ import collections
 import os
 import asyncio
 from typing import Optional, List, Dict, Any
+from runtime.gincana_engine import GincanaEngine
 
 logger = logging.getLogger("BBB_IA")
 
@@ -83,6 +84,9 @@ class World:
         # ── F08 — Missões Individuais ─────────────────────────────────────────
         self.mission_catalog: List[dict] = []       # Preenchido em _init_missions()
         self._init_missions()
+
+        # ── F12 — Modo Gincana ────────────────────────────────────────────────
+        self.gincana: GincanaEngine = GincanaEngine(self)
 
         # Day/Night Cycle: 120 ticks total (70 day + 10 dusk + 30 night + 10 dawn)
         self.DAY_CYCLE = 120
@@ -962,6 +966,10 @@ class World:
         self._tick_missions_f08(events)
         self._tick_reputation_f07(events)
 
+        # ── F12 — Gincana Engine ──────────────────────────────────────────────
+        if self.game_mode == "gincana" and self.gincana.active:
+            self.gincana.tick(events)
+
         return events
 
 
@@ -1553,6 +1561,8 @@ class World:
             "event_history_count": len(self.event_history),
             # F08 — Catálogo de missões
             "mission_catalog_count": len(self.mission_catalog),
+            # F12 — Gincana
+            "gincana": self.gincana.get_state() if self.game_mode == "gincana" else None,
         }
 
     def reset_agents(self, AgentClass, player_count=None):

@@ -1829,3 +1829,63 @@ async def get_all_missions_progress():
          "completed": a.mission_completed_tick is not None,
          "bonus_score": a.mission_bonus_score}
         for a in world.agents]}
+
+# ═══════════════════════════════════════════════════════════════════════
+# F12 — Modo Gincana
+# ═══════════════════════════════════════════════════════════════════════
+
+class GincanaStartRequest(BaseModel):
+    max_ticks: int = 400
+
+
+@app.post("/gincana/start", dependencies=[Depends(verify_admin_token)])
+async def gincana_start(req: GincanaStartRequest = GincanaStartRequest()):
+    """F12: Inicia a Gincana no mundo atual. Requer X-Admin-Token e game_mode=gincana."""
+    if world.game_mode != "gincana":
+        raise HTTPException(400, "Mundo não está no modo gincana. Faça /reset com game_mode=gincana.")
+    world.gincana.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏁 Gincana iniciada! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "max_ticks": req.max_ticks, "gincana": world.gincana.get_state()}
+
+
+@app.post("/gincana/stop", dependencies=[Depends(verify_admin_token)])
+async def gincana_stop():
+    """F12: Encerra a Gincana e retorna resultado final. Requer X-Admin-Token."""
+    result = world.gincana.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏆 Gincana encerrada! Vencedor: {result.get('winner_name')}"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.get("/gincana/state")
+async def gincana_state():
+    """F12: Retorna o estado atual da Gincana (placar, checkpoints, artefato)."""
+    return {
+        "game_mode": world.game_mode,
+        "ticks": world.ticks,
+        "gincana": world.gincana.get_state(),
+    }
+
+
+@app.get("/gincana/templates")
+async def gincana_templates():
+    """F12: Retorna os templates e configurações disponíveis para Gincana."""
+    return {
+        "templates": [
+            {"id": "classic", "name": "Gincana Clássica", "max_ticks": 400,
+             "description": "4 checkpoints + artefato central. 400 ticks."},
+            {"id": "sprint", "name": "Sprint", "max_ticks": 150,
+             "description": "Corrida rápida por checkpoints. 150 ticks."},
+            {"id": "marathon", "name": "Maratona", "max_ticks": 800,
+             "description": "Longa batalha por artefatos. 800 ticks."},
+        ],
+        "scoring": {
+            "checkpoint": 5,
+            "delivery": 20,
+        }
+    }

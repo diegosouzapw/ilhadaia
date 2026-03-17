@@ -1196,3 +1196,137 @@ class TestMissoesIndividuais:
             resp = client.get("/missions/progress")
             assert resp.status_code == 200
             assert "missions" in resp.json()
+
+
+# ══════════════════════════════════════════════════════════════
+# F12 — Modo Gincana
+# ══════════════════════════════════════════════════════════════
+
+class TestModoGincana:
+    def _make_gincana_world(self):
+        from world import World
+        from agent import Agent
+        w = World(size=24, game_mode="gincana")
+        for i, (name, x, y) in enumerate([("João", 2, 2), ("Maria", 20, 20), ("Zeca", 20, 2)]):
+            ag = Agent(name, "test", x, y)
+            w.add_agent(ag)
+        return w
+
+    def test_gincana_engine_initializes(self):
+        w = self._make_gincana_world()
+        assert w.gincana is not None
+        assert not w.gincana.active
+        assert w.gincana.winner is None
+
+    def test_gincana_start_initializes_scores(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=200)
+        assert w.gincana.active
+        for agent in w.agents:
+            assert agent.id in w.gincana.gincana_scores
+            assert w.gincana.gincana_scores[agent.id] == 0.0
+
+    def test_gincana_checkpoint_capture(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=200)
+        agent = w.agents[0]
+        # Posiciona agente em cima de um checkpoint
+        cp_id = list(w.gincana.checkpoints_captured.keys())[0]
+        cp = w.entities[cp_id]
+        agent.x, agent.y = cp["x"], cp["y"]
+        events = []
+        w.gincana.tick(events)
+        assert w.gincana.checkpoints_captured[cp_id] == agent.id
+        assert w.gincana.gincana_scores[agent.id] == 5.0
+        assert any("checkpoint_captured" in str(e) for e in events)
+
+    def test_gincana_artifact_pickup(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=200)
+        agent = w.agents[0]
+        artifact = w.entities.get("artifact_main")
+        assert artifact is not None
+        agent.x, agent.y = artifact["x"], artifact["y"]
+        events = []
+        w.gincana.tick(events)
+        assert w.gincana.artifact_holder == agent.id
+        assert any("artifact_picked" in str(e) for e in events)
+
+    def test_gincana_artifact_delivery(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=200)
+        agent = w.agents[0]
+        # Força agente como holder do artefato
+        w.gincana.artifact_holder = agent.id
+        # Posiciona na delivery zone
+        delivery = w.entities.get("delivery_zone")
+        assert delivery is not None
+        agent.x, agent.y = delivery["x"], delivery["y"]
+        events = []
+        w.gincana.tick(events)
+        assert w.gincana.artifact_holder is None
+        assert w.gincana.gincana_scores[agent.id] == 20.0
+        assert len(w.gincana.deliveries) == 1
+        assert any("artifact_delivered" in str(e) for e in events)
+
+    def test_gincana_stop_returns_winner(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=200)
+        # Simula pontuação
+        agent = w.agents[0]
+        w.gincana.gincana_scores[agent.id] = 25.0
+        result = w.gincana.stop()
+        assert result["winner_id"] == agent.id
+        assert result["scores"][agent.id] == 25.0
+        assert not w.gincana.active
+
+    def test_gincana_timer_ends_game(self):
+        w = self._make_gincana_world()
+        w.gincana.start(max_ticks=5)
+        w.ticks = w.gincana.start_tick + 6  # além do timer
+        events = []
+        w.gincana.tick(events)
+        assert not w.gincana.active
+        assert any("gincana_end" in str(e) for e in events)
+
+    def test_gincana_state_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/gincana/state")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "gincana" in data
+
+    def test_gincana_templates_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/gincana/templates")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "templates" in data
+            assert len(data["templates"]) >= 3
+
+    def test_gincana_start_endpoint_requires_gincana_mode(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            # O modo padrão é survival, então deve retornar 400
+            resp = client.post("/gincana/start",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={})
+            # Survival mode → 400
+            assert resp.status_code == 400
+
+    def test_get_state_includes_gincana_field(self):
+        from world import World
+        w = World(size=24, game_mode="gincana")
+        state = w.get_state()
+        assert "gincana" in state
+        assert state["gincana"] is not None
+        assert "active" in state["gincana"]
