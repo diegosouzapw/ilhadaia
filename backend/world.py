@@ -9,7 +9,19 @@ from typing import Optional, List, Dict, Any
 logger = logging.getLogger("BBB_IA")
 
 class World:
-    def __init__(self, size=None):
+    # Modos de jogo válidos e tamanho recomendado por modo
+    MODE_SIZES = {
+        "survival": 32,
+        "gincana":  32,
+        "warfare":  40,
+        "economy":  36,
+        "hybrid":   44,
+    }
+    VALID_MODES = set(MODE_SIZES.keys())
+
+    def __init__(self, size=None, game_mode: str = "survival"):
+        # Modo de jogo
+        self.game_mode: str = game_mode if game_mode in self.VALID_MODES else "survival"
         # Initialize world state with grid size
         self.size = self._resolve_world_size(size)
         self._configure_landmarks()
@@ -20,7 +32,7 @@ class World:
         self.entities: Dict[str, Any] = {} # Map of id -> entity (agents, items)
         self.system_agent_overrides: Dict[str, str] = {} # sys_id -> profile_id
         
-        # Initialize map with basic resources (wood, stone)
+        # Initialize map with basic resources
         self._init_map()
         
         # the agents list to tick
@@ -63,12 +75,16 @@ class World:
 
     def _resolve_world_size(self, size) -> int:
         if size is None:
-            size_env = os.getenv("WORLD_SIZE", "32").strip()
-            try:
-                size = int(size_env)
-            except ValueError:
-                logger.warning("Invalid WORLD_SIZE=%s. Falling back to 32.", size_env)
-                size = 32
+            # Se tamanho não especificado, usar tamanho recomendado pelo modo
+            env_size = os.getenv("WORLD_SIZE", "").strip()
+            if env_size:
+                try:
+                    size = int(env_size)
+                except ValueError:
+                    logger.warning("Invalid WORLD_SIZE=%s. Using mode default.", env_size)
+                    size = self.MODE_SIZES.get(self.game_mode, 32)
+            else:
+                size = self.MODE_SIZES.get(self.game_mode, 32)
         try:
             parsed = int(size)
         except (TypeError, ValueError):
@@ -160,7 +176,7 @@ class World:
             logger.error(f"Error saving history/settings: {e}")
 
     def _init_map(self):
-        logger.info(f"Initialized world map {self.size}x{self.size}")
+        logger.info(f"Initialized world map {self.size}x{self.size} (mode={self.game_mode})")
 
         door_tiles = set()
         for (hx, hy), name in zip(self.house_positions, ["João", "Maria", "Zeca", "Elly"]):
@@ -195,6 +211,87 @@ class World:
         self.add_entity("house_zeca", {"type": "house", "x": self.house_positions[2][0], "y": self.house_positions[2][1], "name": "Casa do Zeca"})
         self.add_entity("house_elly", {"type": "house", "x": self.house_positions[3][0], "y": self.house_positions[3][1], "name": "Casa da Elly"})
         self.add_entity("cemetery_area", {"type": "cemetery", "x": self.cemetery_x, "y": self.cemetery_y, "name": "Cemitério da Ilha"})
+
+        # Spawnar objetos específicos do modo de jogo
+        self._spawn_mode_objects()
+
+    def _get_mode_spawn_objects(self) -> list:
+        """Retorna lista de objetos extras a spawnar com base no game_mode."""
+        margin = max(2, min(4, self.size // 8))
+        sz = self.size
+        mode = self.game_mode
+        objects = []
+
+        if mode in ("gincana",):
+            # Checkpoints em 4 cantos mais internos
+            positions_cp = [
+                (sz // 4, sz // 4),
+                (sz * 3 // 4, sz // 4),
+                (sz // 4, sz * 3 // 4),
+                (sz * 3 // 4, sz * 3 // 4),
+            ]
+            for i, (cx, cy) in enumerate(positions_cp):
+                objects.append({"id": f"checkpoint_{i}", "type": "checkpoint", "x": cx, "y": cy, "name": f"Checkpoint {i+1}", "captured": False})
+            objects.append({"id": "artifact_main", "type": "artifact", "x": sz // 2 + 3, "y": sz // 2 - 3, "name": "Artefato Principal", "collected": False})
+            objects.append({"id": "delivery_zone", "type": "delivery_marker", "x": margin, "y": sz - margin - 1, "name": "Zona de Entrega"})
+
+        elif mode in ("warfare",):
+            # Bases de time
+            objects.append({"id": "team_base_a", "type": "team_base", "x": margin + 1, "y": margin + 1, "name": "Base Alpha", "team": "alpha"})
+            objects.append({"id": "team_base_b", "type": "team_base", "x": sz - margin - 2, "y": sz - margin - 2, "name": "Base Beta", "team": "beta"})
+            # Zona de controle central
+            objects.append({"id": "control_zone_center", "type": "control_zone", "x": sz // 2, "y": sz // 2 - 4, "name": "Zona Central", "controlled_by": None, "capture_ticks": 0})
+            # Supply crates
+            for i, (sx, sy) in enumerate([(sz // 4, sz // 2), (sz * 3 // 4, sz // 2), (sz // 2, sz // 4)]):
+                objects.append({"id": f"supply_crate_{i}", "type": "supply_crate", "x": sx, "y": sy, "name": f"Caixote de Suprimentos {i+1}", "loot": ["ammo", "medkit"]})
+            # Ammo caches
+            for i, (ax, ay) in enumerate([(sz // 3, sz // 3), (sz * 2 // 3, sz // 3), (sz // 3, sz * 2 // 3)]):
+                objects.append({"id": f"ammo_cache_{i}", "type": "ammo_cache", "x": ax, "y": ay, "name": f"Depósito de Munição {i+1}", "ammo": 5})
+            # Throwables espalhados
+            for i in range(6):
+                tx, ty = random.randint(margin, sz - margin - 1), random.randint(margin, sz - margin - 1)
+                objects.append({"id": f"throwable_{i}", "type": "throwable_stone", "x": tx, "y": ty, "name": "Pedra Arremessável"})
+            # Cover
+            for i in range(4):
+                cx2, cy2 = random.randint(sz // 4, sz * 3 // 4), random.randint(sz // 4, sz * 3 // 4)
+                objects.append({"id": f"cover_{i}", "type": "cover", "x": cx2, "y": cy2, "name": f"Abrigo Tático {i+1}"})
+
+        elif mode in ("economy",):
+            # Posto de mercado central
+            objects.append({"id": "market_post_main", "type": "market_post", "x": sz // 2 + 2, "y": sz // 2 + 2, "name": "Mercado Central", "prices": {"fruit": 1, "water_bottle": 2, "wood": 1}})
+            objects.append({"id": "market_post_2", "type": "market_post", "x": sz * 3 // 4, "y": sz // 4, "name": "Mercado Norte", "prices": {"fruit": 2, "water_bottle": 1, "wood": 2}})
+            # Storage boxes
+            for i, (bx, by) in enumerate([(margin + 2, sz * 2 // 3), (sz - margin - 3, sz // 3)]):
+                objects.append({"id": f"storage_box_{i}", "type": "storage_box", "x": bx, "y": by, "name": f"Armazém {i+1}", "inventory": []})
+            # Trade orders board
+            objects.append({"id": "trade_board", "type": "trade_order", "x": sz // 2 - 3, "y": sz // 2 + 3, "name": "Quadro de Ordens", "orders": []})
+            # Contract items
+            objects.append({"id": "contract_item_1", "type": "contract_item", "x": sz // 4, "y": sz * 3 // 4, "name": "Contrato de Colheita", "reward": 5, "required": "fruit", "amount": 3})
+
+        elif mode in ("hybrid",):
+            # Composto de warfare + economy
+            objects.append({"id": "team_base_a", "type": "team_base", "x": margin + 1, "y": margin + 1, "name": "Base Alpha", "team": "alpha"})
+            objects.append({"id": "team_base_b", "type": "team_base", "x": sz - margin - 2, "y": sz - margin - 2, "name": "Base Beta", "team": "beta"})
+            objects.append({"id": "black_market", "type": "black_market", "x": sz // 2, "y": sz * 3 // 4, "name": "Mercado Negro", "risk": 0.3, "prices": {"ammo": 3, "weapon": 10}})
+            objects.append({"id": "sabotage_target_1", "type": "sabotage_target", "x": sz // 4, "y": sz // 2, "name": "Alvo de Sabotagem Alpha", "team_owner": "beta", "hp": 10})
+            objects.append({"id": "sabotage_target_2", "type": "sabotage_target", "x": sz * 3 // 4, "y": sz // 2, "name": "Alvo de Sabotagem Beta", "team_owner": "alpha", "hp": 10})
+            objects.append({"id": "depot_alpha", "type": "team_inventory_depot", "x": margin + 3, "y": margin + 3, "name": "Depósito Alpha", "team": "alpha", "inventory": []})
+            objects.append({"id": "depot_beta", "type": "team_inventory_depot", "x": sz - margin - 4, "y": sz - margin - 4, "name": "Depósito Beta", "team": "beta", "inventory": []})
+            for i in range(4):
+                tx, ty = random.randint(margin, sz - margin - 1), random.randint(margin, sz - margin - 1)
+                objects.append({"id": f"throwable_{i}", "type": "throwable_stone", "x": tx, "y": ty, "name": "Pedra Arremessável"})
+
+        return objects
+
+    def _spawn_mode_objects(self) -> None:
+        """Spawna objetos específicos do modo de jogo no mapa atual."""
+        mode_objects = self._get_mode_spawn_objects()
+        for obj in mode_objects:
+            eid = obj.pop("id", f"mode_obj_{len(self.entities)}")
+            self.add_entity(eid, obj)
+        if mode_objects:
+            logger.info(f"Mode '{self.game_mode}': spawned {len(mode_objects)} extra objects.")
+
 
     def add_entity(self, entity_id: str, data: dict):
         self.entities[entity_id] = data
@@ -676,6 +773,15 @@ class World:
         day_pos = self.ticks % self.DAY_CYCLE
         is_night = 80 <= day_pos < 110
 
+        # F01 — Verificar e expirar human_command
+        human_command = getattr(agent, "human_command", None)
+        command_expire_tick = getattr(agent, "command_expire_tick", 0)
+        if human_command is not None and self.ticks >= command_expire_tick:
+            agent.human_command = None
+            agent.command_expire_tick = 0
+            agent.command_source = "ai"
+            human_command = None
+
         return {
             "time": self.ticks,
             "is_night": is_night,
@@ -689,8 +795,13 @@ class World:
             "inventory": agent.inventory,
             "is_moving_automatically_to": (agent.target_x, agent.target_y) if agent.target_x is not None else None,
             "is_carrying_body": is_carrying_body,
-            "carrying_name": carrying_name
+            "carrying_name": carrying_name,
+            # F01 — Comando humano injetado no contexto
+            "human_command": human_command,
+            "command_source": getattr(agent, "command_source", "ai"),
+            "game_mode": self.game_mode,
         }
+
         
     def _is_walkable(self, x, y):
         # Verifica se as coordenadas estão dentro dos limites do mapa e não contêm obstáculos
@@ -1026,8 +1137,11 @@ class World:
                      "apples_eaten": getattr(agent, "apples_eaten", 0),
                      "water_drunk": getattr(agent, "water_drunk", 0),
                      "chats_sent": getattr(agent, "chats_sent", 0),
-                     "is_zombie": getattr(agent, "is_zombie", False)
+                     "is_zombie": getattr(agent, "is_zombie", False),
+                     "human_command": getattr(agent, "human_command", None),
+                     "command_source": getattr(agent, "command_source", "ai"),
                  })
+
                  
         next_agent_name = None
         if self.ai_interval > 0:
@@ -1084,7 +1198,8 @@ class World:
             "ai_model": self.ai_model,
             "omniroute_url": self.omniroute_url,
             "day_cycle": self.ticks % self.DAY_CYCLE,
-            "is_night": 80 <= (self.ticks % self.DAY_CYCLE) < 110
+            "is_night": 80 <= (self.ticks % self.DAY_CYCLE) < 110,
+            "game_mode": self.game_mode,
         }
 
     def reset_agents(self, AgentClass, player_count=None):

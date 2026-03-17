@@ -1532,3 +1532,309 @@ checkOpeningScreenState();
 
 animate();
 renderer.domElement.addEventListener('click', handleWorldClick);
+
+// ═══════════════════════════════════════════════════════════════════════
+// F01 — Modo Comandante por Linguagem Natural
+// ═══════════════════════════════════════════════════════════════════════
+
+let commanderModal = null;
+let commanderAgentId = null;
+
+function openCommanderModal(agentId, agentName) {
+    commanderAgentId = agentId;
+    // Remove modal antigo se existir
+    if (commanderModal) commanderModal.remove();
+
+    commanderModal = document.createElement('div');
+    commanderModal.style.cssText = `
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(15, 15, 30, 0.97); border: 1px solid #4a9eff;
+        border-radius: 12px; padding: 24px; z-index: 9999;
+        width: 360px; box-shadow: 0 0 30px rgba(74,158,255,0.4);
+        font-family: system-ui, sans-serif; color: white;
+    `;
+    commanderModal.innerHTML = `
+        <h3 style="margin:0 0 8px; color:#4a9eff;">🎮 Modo Comandante</h3>
+        <p style="margin:0 0 16px; font-size:0.85em; color:#aaa;">Agente: <strong style="color:white">${agentName}</strong></p>
+        <textarea id="cmd-input" placeholder="Ex: Vai buscar água no lago..." 
+            style="width:100%; height:80px; background:#1a1a2e; border:1px solid #333;
+                   color:white; border-radius:8px; padding:8px; resize:none; box-sizing:border-box; font-size:0.9em;"></textarea>
+        <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+            <label style="font-size:0.8em; color:#aaa;">Duração (ticks):</label>
+            <input id="cmd-expire" type="number" value="30" min="5" max="200"
+                style="width:70px; background:#1a1a2e; border:1px solid #333; color:white; 
+                       border-radius:6px; padding:4px 8px; text-align:center;">
+        </div>
+        <div style="display:flex; gap:8px; margin-top:16px;">
+            <button onclick="sendAgentCommand()" 
+                style="flex:1; background:#4a9eff; color:white; border:none; 
+                       border-radius:8px; padding:10px; cursor:pointer; font-weight:600;">
+                📤 Enviar Comando
+            </button>
+            <button onclick="cancelAgentCommand()" 
+                style="flex:0.6; background:#444; color:#fff; border:none; 
+                       border-radius:8px; padding:10px; cursor:pointer;">
+                🔓 Liberar
+            </button>
+            <button onclick="closeCommanderModal()" 
+                style="flex:0.4; background:transparent; color:#aaa; border:1px solid #333; 
+                       border-radius:8px; padding:10px; cursor:pointer;">✕</button>
+        </div>
+        <div id="cmd-status" style="margin-top:10px; font-size:0.82em; min-height:18px; color:#aaa;"></div>
+    `;
+    document.body.appendChild(commanderModal);
+    setTimeout(() => document.getElementById('cmd-input')?.focus(), 100);
+}
+
+function closeCommanderModal() {
+    if (commanderModal) { commanderModal.remove(); commanderModal = null; }
+}
+
+async function sendAgentCommand() {
+    const input = document.getElementById('cmd-input')?.value?.trim();
+    const expire = parseInt(document.getElementById('cmd-expire')?.value) || 30;
+    if (!input || !commanderAgentId) return;
+    const statusEl = document.getElementById('cmd-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/agents/${commanderAgentId}/command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: input, expire_ticks: expire })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            if (statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ Comando enviado! Expira no tick ${data.expires_at_tick}</span>`;
+        } else {
+            if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Erro: ${data.detail}</span>`;
+        }
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha na conexão</span>`;
+    }
+}
+
+async function cancelAgentCommand() {
+    if (!commanderAgentId) return;
+    await fetch(`${API_BASE_URL}/agents/${commanderAgentId}/command/cancel`, { method: 'POST' });
+    const statusEl = document.getElementById('cmd-status');
+    if (statusEl) statusEl.innerHTML = `<span style="color:#aaa">🔓 Agente liberado para autonomia.</span>`;
+}
+
+// Expõe globalmente para chamada no handleWorldClick
+window.openCommanderModal = openCommanderModal;
+
+// ═══════════════════════════════════════════════════════════════════════
+// F03 — Decision Inspector Panel
+// ═══════════════════════════════════════════════════════════════════════
+
+let inspectorPanel = null;
+let inspectorIntervalId = null;
+
+async function showDecisionInspector(agentId, agentName) {
+    // Remove painel antigo se existir
+    if (inspectorPanel) { inspectorPanel.remove(); clearInterval(inspectorIntervalId); }
+
+    inspectorPanel = document.createElement('div');
+    inspectorPanel.id = 'decision-inspector';
+    inspectorPanel.style.cssText = `
+        position: fixed; top: 60px; right: 10px;
+        background: rgba(10,10,20,0.96); border: 1px solid #6a4aff;
+        border-radius: 12px; padding: 16px; z-index: 8888;
+        width: 320px; max-height: 70vh; overflow-y: auto;
+        box-shadow: 0 0 24px rgba(106,74,255,0.35);
+        font-family: system-ui, sans-serif; color: white; font-size: 0.82em;
+    `;
+    inspectorPanel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="margin:0; color:#9b6aff;">🔍 Inspector: <span style="color:white">${agentName}</span></h4>
+            <button onclick="closeInspectorPanel()" style="background:transparent; border:none; color:#aaa; cursor:pointer; font-size:1.1em;">✕</button>
+        </div>
+        <div id="inspector-content">Carregando...</div>
+    `;
+    document.body.appendChild(inspectorPanel);
+
+    async function refreshInspector() {
+        try {
+            const [decResp, memResp] = await Promise.all([
+                fetch(`${API_BASE_URL}/agents/${agentId}/decisions?n=5`),
+                fetch(`${API_BASE_URL}/agents/${agentId}/memory/relevant`)
+            ]);
+            const decisions = await decResp.json();
+            const memory = await memResp.json();
+            const content = document.getElementById('inspector-content');
+            if (!content) return;
+
+            let html = `<div style="margin-bottom:10px;">
+                <strong style="color:#9b6aff;">💭 Últimas Decisões</strong>`;
+            const decs = decisions.decisions || [];
+            if (decs.length === 0) {
+                html += `<p style="color:#666;">Nenhuma decisão registrada ainda.</p>`;
+            } else {
+                decs.slice().reverse().forEach(d => {
+                    const color = d.result === 'success' ? '#4eff91' : (d.result === 'invalid' ? '#ff6b6b' : '#aaa');
+                    html += `<div style="border-left:2px solid ${color}; padding:4px 8px; margin:4px 0; background:rgba(255,255,255,0.04); border-radius:0 6px 6px 0;">
+                        <div style="color:#ccc;">T${d.tick} — <em>${d.action}</em></div>
+                        <div style="color:#888; font-size:0.9em;">${(d.thought||'').substring(0,80)}${d.thought?.length>80?'...':''}</div>
+                        <div style="color:#666; font-size:0.8em;">${d.latency_ms?.toFixed(0)||0}ms · ${(d.prompt_tokens||0)+(d.completion_tokens||0)} tokens</div>
+                    </div>`;
+                });
+            }
+            html += `</div>`;
+
+            html += `<div style="margin-bottom:10px; padding-top:8px; border-top:1px solid #222;">
+                <strong style="color:#9b6aff;">🧠 Tokens</strong>
+                <div style="margin-top:4px;">
+                    <span style="color:#4a9eff">${memory.tokens_used?.toLocaleString()}</span>
+                    / ${memory.token_budget?.toLocaleString()} tokens usados
+                </div>
+                <div style="background:#1a1a2e; border-radius:4px; height:6px; margin-top:4px; overflow:hidden;">
+                    <div style="background:#4a9eff; height:100%; width:${Math.min(100,(memory.tokens_used/memory.token_budget*100)||0)}%;"></div>
+                </div>
+            </div>`;
+
+            const shortMem = memory.short_term || [];
+            if (shortMem.length > 0) {
+                html += `<div style="padding-top:8px; border-top:1px solid #222;">
+                    <strong style="color:#9b6aff;">📍 Memória Recente</strong>`;
+                shortMem.slice(-3).reverse().forEach(m => {
+                    html += `<div style="color:#888; margin:3px 0; padding:3px 6px; background:rgba(255,255,255,0.03); border-radius:4px;">T${m.tick}: ${(m.thought||m.action||'').substring(0,60)}</div>`;
+                });
+                html += `</div>`;
+            }
+
+            content.innerHTML = html;
+        } catch(e) {
+            const content = document.getElementById('inspector-content');
+            if (content) content.innerHTML = `<span style="color:#ff4d4d">Erro ao carregar dados</span>`;
+        }
+    }
+
+    await refreshInspector();
+    inspectorIntervalId = setInterval(refreshInspector, 3000);
+}
+
+function closeInspectorPanel() {
+    if (inspectorPanel) { inspectorPanel.remove(); inspectorPanel = null; }
+    clearInterval(inspectorIntervalId);
+}
+
+window.showDecisionInspector = showDecisionInspector;
+
+// ═══════════════════════════════════════════════════════════════════════
+// F05 — Painel Admin Console
+// ═══════════════════════════════════════════════════════════════════════
+
+let adminPanel = null;
+
+function toggleAdminPanel() {
+    if (adminPanel) { adminPanel.remove(); adminPanel = null; return; }
+    adminPanel = document.createElement('div');
+    adminPanel.id = 'admin-console-panel';
+    adminPanel.style.cssText = `
+        position: fixed; bottom: 70px; right: 10px;
+        background: rgba(20,10,10,0.97); border: 1px solid #ff4d4d;
+        border-radius: 12px; padding: 16px; z-index: 8777;
+        width: 300px; box-shadow: 0 0 24px rgba(255,77,77,0.3);
+        font-family: system-ui, sans-serif; color: white; font-size: 0.82em;
+    `;
+    adminPanel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="margin:0; color:#ff4d4d;">🔧 Console Admin</h4>
+            <button onclick="toggleAdminPanel()" style="background:transparent; border:none; color:#aaa; cursor:pointer;">✕</button>
+        </div>
+        <div style="margin-bottom:10px;">
+            <strong style="color:#ff4d4d; font-size:0.9em;">⚡ Eventos Globais</strong>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+                ${['tempestade','seca','suprimentos','radio','eclipse'].map(ev => `
+                    <button onclick="adminTriggerEvent('${ev}')"
+                        style="background:#2a1010; border:1px solid #ff4d4d; color:#ff9999;
+                               border-radius:6px; padding:5px 10px; cursor:pointer; font-size:0.82em;">
+                        ${ev === 'tempestade' ? '⛈️' : ev === 'seca' ? '🌵' : ev === 'suprimentos' ? '📦' : ev === 'radio' ? '📻' : '🌑'} ${ev}
+                    </button>`).join('')}
+            </div>
+        </div>
+        <div style="border-top:1px solid #333; padding-top:10px; margin-bottom:10px;">
+            <strong style="color:#ff4d4d; font-size:0.9em;">🧱 Spawnar Objeto</strong>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:6px;">
+                <input id="spawn-type" placeholder="tipo" value="supply_crate"
+                    style="grid-column:1/-1; background:#1a0000; border:1px solid #333; color:white; 
+                           border-radius:6px; padding:5px 8px;">
+                <input id="spawn-x" type="number" placeholder="X" value="16"
+                    style="background:#1a0000; border:1px solid #333; color:white; border-radius:6px; padding:5px 8px;">
+                <input id="spawn-y" type="number" placeholder="Y" value="16"
+                    style="background:#1a0000; border:1px solid #333; color:white; border-radius:6px; padding:5px 8px;">
+                <button onclick="adminSpawnObject()"
+                    style="background:#ff4d4d; color:white; border:none; border-radius:6px; padding:5px 8px; cursor:pointer;">
+                    + Spawnar
+                </button>
+            </div>
+        </div>
+        <div id="admin-status" style="font-size:0.8em; color:#aaa; min-height:18px;"></div>
+    `;
+    document.body.appendChild(adminPanel);
+}
+
+async function adminTriggerEvent(eventType) {
+    const statusEl = document.getElementById('admin-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/event`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ event_type: eventType })
+        });
+        const data = await resp.json();
+        if (resp.ok && statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ ${data.message.substring(0,60)}</span>`;
+        else if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ ${data.detail || 'Erro'}</span>`;
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha</span>`;
+    }
+}
+
+async function adminSpawnObject() {
+    const type = document.getElementById('spawn-type')?.value?.trim() || 'stone';
+    const x = parseInt(document.getElementById('spawn-x')?.value) || 16;
+    const y = parseInt(document.getElementById('spawn-y')?.value) || 16;
+    const statusEl = document.getElementById('admin-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/spawn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ type, x, y })
+        });
+        const data = await resp.json();
+        if (resp.ok && statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ ${type} criado em (${x},${y})</span>`;
+        else if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ ${data.detail}</span>`;
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha</span>`;
+    }
+}
+
+window.toggleAdminPanel = toggleAdminPanel;
+window.adminTriggerEvent = adminTriggerEvent;
+window.adminSpawnObject = adminSpawnObject;
+window.closeCommanderModal = closeCommanderModal;
+window.closeInspectorPanel = closeInspectorPanel;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Atualizar resetGame para suportar game_mode
+// ═══════════════════════════════════════════════════════════════════════
+
+window.resetGameWithMode = async function(count, gameMode) {
+    const playerCount = count || document.getElementById('player-count-selector')?.value || 4;
+    const mode = gameMode || document.getElementById('game-mode-selector')?.value || 'survival';
+    try {
+        const response = await fetch(`${API_BASE_URL}/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ player_count: parseInt(playerCount), game_mode: mode })
+        });
+        if (response.ok) {
+            chatHistory = [];
+            localStorage.removeItem('bbb_chat_history');
+            renderChat();
+        } else if (response.status === 401) {
+            alert("Não autorizado. Verifique seu Admin Token.");
+        }
+    } catch (e) {
+        console.error("Reset failed", e);
+    }
+};

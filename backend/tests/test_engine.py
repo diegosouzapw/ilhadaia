@@ -453,3 +453,281 @@ class TestAISettingsEndpoints:
             assert data["base_url"]
             assert isinstance(data["models"], list)
             assert len(data["models"]) > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# P00 — Game Mode: Matriz de Spawn por Modo
+# ══════════════════════════════════════════════════════════════
+
+class TestGameMode:
+    def test_survival_mode_has_no_extra_objects(self):
+        from world import World
+        w = World(size=32, game_mode="survival")
+        mode_objs = w._get_mode_spawn_objects()
+        assert mode_objs == [], "survival não deve spawnar objetos extras"
+
+    def test_gincana_mode_spawns_checkpoints(self):
+        from world import World
+        w = World(size=32, game_mode="gincana")
+        mode_objs = w._get_mode_spawn_objects()
+        types = [o["type"] for o in mode_objs]
+        assert "checkpoint" in types
+        assert "artifact" in types
+        assert "delivery_marker" in types
+
+    def test_warfare_mode_spawns_bases_and_ammo(self):
+        from world import World
+        w = World(size=32, game_mode="warfare")
+        mode_objs = w._get_mode_spawn_objects()
+        types = [o["type"] for o in mode_objs]
+        assert "team_base" in types
+        assert "ammo_cache" in types
+        assert "supply_crate" in types
+        assert "control_zone" in types
+
+    def test_economy_mode_spawns_market(self):
+        from world import World
+        w = World(size=36, game_mode="economy")
+        mode_objs = w._get_mode_spawn_objects()
+        types = [o["type"] for o in mode_objs]
+        assert "market_post" in types
+        assert "trade_order" in types
+
+    def test_hybrid_mode_spawns_black_market(self):
+        from world import World
+        w = World(size=44, game_mode="hybrid")
+        mode_objs = w._get_mode_spawn_objects()
+        types = [o["type"] for o in mode_objs]
+        assert "black_market" in types
+        assert "sabotage_target" in types
+        assert "team_inventory_depot" in types
+
+    def test_game_mode_exposed_in_get_state(self):
+        from world import World
+        from agent import Agent
+        w = World(size=32, game_mode="gincana")
+        w.reset_agents(Agent)
+        state = w.get_state()
+        assert state["game_mode"] == "gincana"
+
+    def test_invalid_mode_falls_back_to_survival(self):
+        from world import World
+        w = World(size=32, game_mode="invalid_mode_xyz")
+        assert w.game_mode == "survival"
+
+    def test_game_mode_persisted_in_session_store(self):
+        from storage.session_store import SessionStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(db_path=os.path.join(tmpdir, "test.db"))
+            sid = store.create_session({"ai_interval": 5}, game_mode="warfare")
+            sessions = store.get_sessions()
+            s = next(s for s in sessions if s["id"] == sid)
+            assert s["game_mode"] == "warfare"
+            store.close()
+
+    def test_mode_objects_within_map_bounds(self):
+        from world import World
+        for mode, size in [("gincana", 32), ("warfare", 40), ("economy", 36), ("hybrid", 44)]:
+            w = World(size=size, game_mode=mode)
+            for obj in w._get_mode_spawn_objects():
+                assert 0 <= obj["x"] < size, f"{mode}: x={obj['x']} fora dos limites"
+                assert 0 <= obj["y"] < size, f"{mode}: y={obj['y']} fora dos limites"
+
+
+# ══════════════════════════════════════════════════════════════
+# F01 — Modo Comandante
+# ══════════════════════════════════════════════════════════════
+
+class TestModoComandante:
+    def test_set_command_updates_agent(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            state = client.get("/").json()
+            # Pega o primeiro agente da lista
+            world_data = client.get("/").json()
+            # Obtém estado e acha um agente vivo
+            import main as m
+            agents = [a for a in m.world.agents if a.is_alive]
+            assert agents, "Deve haver pelo menos um agente vivo"
+            agent_id = agents[0].id
+
+            resp = client.post(f"/agents/{agent_id}/command",
+                               json={"command": "Vai buscar água!", "expire_ticks": 50})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["command"] == "Vai buscar água!"
+            assert agents[0].human_command == "Vai buscar água!"
+
+    def test_cancel_command_clears_agent(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            import main as m
+            agents = [a for a in m.world.agents if a.is_alive]
+            agent_id = agents[0].id
+            # Seta depois cancela
+            client.post(f"/agents/{agent_id}/command",
+                        json={"command": "Teste", "expire_ticks": 10})
+            client.post(f"/agents/{agent_id}/command/cancel")
+            assert agents[0].human_command is None
+            assert agents[0].command_source == "ai"
+
+    def test_get_command_returns_active_status(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            import main as m
+            agents = [a for a in m.world.agents if a.is_alive]
+            agent_id = agents[0].id
+            client.post(f"/agents/{agent_id}/command",
+                        json={"command": "Explorar norte", "expire_ticks": 100})
+            resp = client.get(f"/agents/{agent_id}/command")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["is_active"] is True
+            assert data["human_command"] == "Explorar norte"
+
+    def test_command_expiration_in_context(self):
+        from world import World
+        from agent import Agent
+        w = World(size=32, game_mode="survival")
+        w.reset_agents(Agent)
+        agent = w.agents[0]
+        # Define comando que já expirou (tick 0, expire tick 0)
+        agent.human_command = "Comando antigo"
+        agent.command_expire_tick = 0  # Já expirou
+        w.ticks = 5
+        ctx = w._get_context_for_agent(agent)
+        assert ctx["human_command"] is None  # Deve ter sido expirado
+
+
+# ══════════════════════════════════════════════════════════════
+# F03 — Decision Inspector
+# ══════════════════════════════════════════════════════════════
+
+class TestDecisionInspector:
+    def test_get_recent_returns_filtered_decisions(self):
+        from storage.decision_log import DecisionLog, DecisionRecord
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dl = DecisionLog(log_dir=tmpdir)
+            dl.start_session("s1")
+            for i in range(8):
+                dl.log(DecisionRecord(
+                    session_id="s1", tick=i, agent_id="a1", agent_name="João",
+                    model="m", provider="p", latency_ms=10.0,
+                    prompt_tokens=10, completion_tokens=5,
+                    thought=f"pensamento {i}", speech="", action="wait",
+                    action_params={}, result="success",
+                ))
+            # Decisões de outro agente
+            dl.log(DecisionRecord(
+                session_id="s1", tick=9, agent_id="a2", agent_name="Maria",
+                model="m", provider="p", latency_ms=10.0,
+                prompt_tokens=10, completion_tokens=5,
+                thought="pensamento de Maria", speech="", action="move",
+                action_params={}, result="success",
+            ))
+            dl.close()
+            # Recuperar apenas de a1
+            recent = dl.get_recent("s1", "a1", n=5)
+            assert len(recent) == 5
+            for r in recent:
+                assert r["agent_id"] == "a1"
+
+    def test_decisions_endpoint_returns_list(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            import main as m
+            agents = m.world.agents
+            agent_id = agents[0].id
+            resp = client.get(f"/agents/{agent_id}/decisions?n=5")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "decisions" in data
+            assert isinstance(data["decisions"], list)
+
+    def test_memory_relevant_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            import main as m
+            agent_id = m.world.agents[0].id
+            resp = client.get(f"/agents/{agent_id}/memory/relevant")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "short_term" in data
+            assert "tokens_used" in data
+
+
+# ══════════════════════════════════════════════════════════════
+# F05 — Console Admin
+# ══════════════════════════════════════════════════════════════
+
+class TestAdminConsole:
+    def test_spawn_without_token_returns_401(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/admin/spawn",
+                               json={"type": "stone", "x": 5, "y": 5})
+            assert resp.status_code in (401, 422)  # sem token → não autorizado
+
+    def test_spawn_with_token_adds_entity(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            initial_count = len(main.world.entities)
+            resp = client.post("/admin/spawn",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={"type": "stone", "x": 5, "y": 5})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "spawned"
+            assert len(main.world.entities) > initial_count
+
+    def test_event_trigger_tempestade(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post("/admin/event",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={"event_type": "tempestade"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["event_type"] == "tempestade"
+
+    def test_admin_profile_change(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            agent_id = main.world.agents[0].id
+            resp = client.post("/admin/agent/profile",
+                               headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                               json={"agent_id": agent_id, "profile_id": "kimi-thinking"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["new_profile"] == "kimi-thinking"
+            assert main.world.agents[0].profile_id == "kimi-thinking"
+
+    def test_admin_world_state_without_token_returns_401(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/admin/world/state")
+            assert resp.status_code == 401
+

@@ -1,10 +1,12 @@
 import os
 import json
 import logging
+from typing import Optional
 from uuid import uuid4
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from runtime.profiles import OMNIROUTER_URL, OMNIROUTER_API_KEY, get_profile
+
 
 # Carrega as variáveis do .env file
 load_dotenv(override=True)
@@ -80,6 +82,12 @@ class Agent:
         self.agent_memory = AgentMemory()
         # Compatibilidade retroativa: self.memory ainda aponta para short_term entries
         self.memory: list = self.agent_memory.short_term  # type: ignore
+
+        # ── F01 — Modo Comandante ─────────────────────────────────────────────
+        self.human_command: Optional[str] = None     # Comando humano ativo
+        self.command_expire_tick: int = 0            # Tick em que o comando expira
+        self.command_source: str = "ai"              # "ai" | "human"
+
         
         # Determine home coordinates
         home_coords = "(2, 2)" # Default fallback

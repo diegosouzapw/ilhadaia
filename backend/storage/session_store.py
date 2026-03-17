@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     world_settings TEXT,
     winner_agent_id TEXT,
     winner_model    TEXT,
+    game_mode   TEXT DEFAULT 'survival',
     status      TEXT DEFAULT 'active'
 );
 
@@ -60,14 +61,31 @@ class SessionStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+        # Migration: adicionar colunas que podem não existir em DBs antigos
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Aplica migrations incrementais para colunas novas sem recriar o schema."""
+        migrations = [
+            ("sessions", "game_mode", "TEXT DEFAULT 'survival'"),
+        ]
+        for table, col, col_def in migrations:
+            try:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                # Coluna já existe — ignorar
+                pass
+
+
 
     # ── Sessions ────────────────────────────────────────────────────────────
 
-    def create_session(self, world_settings: dict) -> str:
+    def create_session(self, world_settings: dict, game_mode: str = "survival") -> str:
         session_id = str(uuid.uuid4())
         self.conn.execute(
-            "INSERT INTO sessions (id, started_at, world_settings, status) VALUES (?, ?, ?, 'active')",
-            (session_id, time.time(), json.dumps(world_settings)),
+            "INSERT INTO sessions (id, started_at, world_settings, game_mode, status) VALUES (?, ?, ?, ?, 'active')",
+            (session_id, time.time(), json.dumps(world_settings), game_mode),
         )
         self.conn.commit()
         return session_id
@@ -84,7 +102,7 @@ class SessionStore:
 
     def get_sessions(self, limit: int = 20) -> list[dict]:
         cur = self.conn.execute(
-            """SELECT id, started_at, ended_at, winner_model, status
+            """SELECT id, started_at, ended_at, winner_model, game_mode, status
                FROM sessions ORDER BY started_at DESC LIMIT ?""",
             (limit,),
         )

@@ -104,6 +104,11 @@ class TournamentConfig(BaseModel):
     reset_on_finish: bool = True
 
 
+class ResetRequest(BaseModel):
+    player_count: int = 4
+    game_mode: str = "survival"
+
+
 class AISettingsRequest(BaseModel):
     ai_provider: str
     ai_model: str
@@ -162,7 +167,7 @@ async def lifespan(app: FastAPI):
         "ai_model": world.ai_model,
         "omniroute_url": world.omniroute_url,
     }
-    _current_session_id = session_store.create_session(_world_settings)
+    _current_session_id = session_store.create_session(_world_settings, game_mode=world.game_mode)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
@@ -354,34 +359,35 @@ def read_root():
         "agents": len(world.agents),
     }
 
-@app.get("/world/state")
-def get_world_state():
-    return world.get_state()
-
-@app.post("/reset")
-async def reset_game(player_count: int = 4):
+@app.post("/reset", dependencies=[Depends(verify_admin_token)])
+async def reset_game(req: ResetRequest = ResetRequest()):
     global _current_session_id
-    world.started = True # Start the game on reset
+    # Valida game_mode
+    valid_modes = set(World.MODE_SIZES.keys())
+    game_mode = req.game_mode if req.game_mode in valid_modes else "survival"
     if _current_session_id:
         for agent in world.agents:
             if getattr(agent, "owner_id", ""):
                 memory_store.save(agent)
         replay_store.force_snapshot(world.ticks, world.get_state())
         session_store.end_session(_current_session_id, None, None)
+    # Atualizar game_mode no mundo
+    world.game_mode = game_mode
     _world_settings = {
         "ai_interval": world.ai_interval,
         "player_count": world.player_count,
         "ai_provider": world.ai_provider,
         "ai_model": world.ai_model,
         "omniroute_url": world.omniroute_url,
+        "game_mode": game_mode,
     }
-    _current_session_id = session_store.create_session(_world_settings)
+    _current_session_id = session_store.create_session(_world_settings, game_mode=game_mode)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
-    world.reset_agents(Agent, player_count=player_count)
+    world.reset_agents(Agent, player_count=req.player_count)
     await manager.broadcast({"type": "reset", "data": world.get_state()})
-    return {"status": "World reset successful", "player_count": player_count, "session_id": _current_session_id}
+    return {"status": "World reset successful", "player_count": req.player_count, "game_mode": game_mode, "session_id": _current_session_id}
 
 @app.post("/settings/ai_interval")
 async def set_ai_interval(interval: int):
@@ -1044,6 +1050,211 @@ async def update_agent_profile(agent_id: str, up: AgentProfileUpdate):
         return {"status": "Potential NPC profile updated", "agent_id": agent_id, "profile_id": up.profile_id}
 
     raise HTTPException(status_code=404, detail="Agente não encontrado")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F01 — Modo Comandante por Linguagem Natural
+# ═══════════════════════════════════════════════════════════════════════
+
+class CommandRequest(BaseModel):
+    command: str
+    expire_ticks: int = 30  # Número de ticks antes de expirar
+
+
+@app.post("/agents/{agent_id}/command")
+async def set_agent_command(agent_id: str, req: CommandRequest):
+    """F01: Define um comando humano para o agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not agent.is_alive:
+        raise HTTPException(400, "Agent is dead")
+    agent.human_command = req.command.strip()
+    agent.command_expire_tick = world.ticks + req.expire_ticks
+    agent.command_source = "human"
+    logger.info(f"F01: Command set for {agent.name}: '{agent.human_command}' (expires tick {agent.command_expire_tick})")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🎮 Operador enviou comando para {agent.name}: '{agent.human_command}'", "agent_id": agent_id}]
+    })
+    return {"status": "Command set", "agent_id": agent_id, "command": agent.human_command, "expires_at_tick": agent.command_expire_tick}
+
+
+@app.post("/agents/{agent_id}/command/cancel")
+async def cancel_agent_command(agent_id: str):
+    """F01: Cancela o comando humano ativo e libera o agente para autonomia."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    agent.human_command = None
+    agent.command_expire_tick = 0
+    agent.command_source = "ai"
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔓 {agent.name} liberado para autonomia.", "agent_id": agent_id}]
+    })
+    return {"status": "Command cancelled", "agent_id": agent_id}
+
+
+@app.get("/agents/{agent_id}/command")
+async def get_agent_command(agent_id: str):
+    """F01: Retorna o estado atual do comando humano do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    is_active = (
+        agent.human_command is not None and
+        world.ticks < agent.command_expire_tick
+    )
+    return {
+        "agent_id": agent_id,
+        "human_command": agent.human_command if is_active else None,
+        "command_source": agent.command_source,
+        "expires_at_tick": agent.command_expire_tick,
+        "is_active": is_active,
+        "ticks_remaining": max(0, agent.command_expire_tick - world.ticks) if is_active else 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F03 — Decision Inspector
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/agents/{agent_id}/decisions")
+async def get_agent_decisions(agent_id: str, n: int = 5):
+    """F03: Retorna as últimas N decisões de um agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if _current_session_id is None:
+        return {"agent_id": agent_id, "decisions": []}
+    decisions = decision_log.get_recent(_current_session_id, agent_id, n=min(n, 20))
+    return {"agent_id": agent_id, "agent_name": agent.name, "decisions": decisions}
+
+
+@app.get("/agents/{agent_id}/memory/relevant")
+async def get_agent_memory(agent_id: str):
+    """F03: Retorna a memória relevante do agente (short_term + episodic resumidos)."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    mem_dict = agent.agent_memory.to_dict() if hasattr(agent, "agent_memory") else {}
+    return {
+        "agent_id": agent_id,
+        "agent_name": agent.name,
+        "short_term": mem_dict.get("short_term", [])[-10:],
+        "episodic": mem_dict.get("episodic", [])[-5:],
+        "relational": mem_dict.get("relational", {}),
+        "tokens_used": getattr(agent, "tokens_used", 0),
+        "token_budget": getattr(agent, "token_budget", 10000),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F05 — Console de Intervenção Admin ao Vivo
+# ═══════════════════════════════════════════════════════════════════════
+
+class AdminSpawnRequest(BaseModel):
+    type: str                     # tipo do objeto (stone, tree, supply_crate, etc)
+    x: int
+    y: int
+    extra: dict = {}              # campos extras opcionais
+
+
+class AdminEventRequest(BaseModel):
+    event_type: str               # tempestade, seca, radio, suprimentos, eclipse
+    message: str = ""
+
+
+class AdminProfileRequest(BaseModel):
+    agent_id: str
+    profile_id: str
+
+
+@app.post("/admin/spawn", dependencies=[Depends(verify_admin_token)])
+async def admin_spawn(req: AdminSpawnRequest):
+    """F05: Spawna um objeto no mapa. Requer X-Admin-Token."""
+    if not (0 <= req.x < world.size and 0 <= req.y < world.size):
+        raise HTTPException(400, f"Coordenadas fora do mapa {world.size}x{world.size}")
+    entity_id = f"admin_spawn_{req.type}_{world.ticks}_{req.x}_{req.y}"
+    obj = {"type": req.type, "x": req.x, "y": req.y, **req.extra}
+    world.add_entity(entity_id, obj)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔧 Admin criou {req.type} em ({req.x},{req.y})"}]
+    })
+    return {"status": "spawned", "entity_id": entity_id, "object": obj}
+
+
+@app.post("/admin/event", dependencies=[Depends(verify_admin_token)])
+async def admin_trigger_event(req: AdminEventRequest):
+    """F05: Dispara um evento global na ilha. Requer X-Admin-Token."""
+    event_messages = {
+        "tempestade": "⛈️ UMA TEMPESTADE VIOLENTA VARREU A ILHA! Todos perdem 5HP!",
+        "seca": "🌵 A SECA CHEGOU! Recursos de água estão escassos por 30 ticks.",
+        "suprimentos": "📦 UM CRATE DE SUPRIMENTOS CAIU DO CÉU!",
+        "radio": "📻 Um rádio misterioso emite sinais da ilha...",
+        "eclipse": "🌑 ECLIPSE TOTAL! A ilha mergulhou na escuridão.",
+    }
+    msg = req.message or event_messages.get(req.event_type, f"🚨 Evento: {req.event_type}")
+
+    # Efeitos do evento tempestade
+    if req.event_type == "tempestade":
+        for agent in world.agents:
+            if agent.is_alive and not getattr(agent, "is_zombie", False):
+                agent.hp = max(0, agent.hp - 5)
+
+    # Efeito suprimentos: spawnar supply crate no centro
+    if req.event_type == "suprimentos":
+        cx, cy = world.size // 2 + random.randint(-3, 3), world.size // 2 + random.randint(-3, 3)
+        world.add_entity(f"event_crate_{world.ticks}", {
+            "type": "supply_crate", "x": cx, "y": cy,
+            "name": "Crate Admin", "loot": ["fruit", "water_bottle"]
+        })
+
+    world.ai_events.append({"action": "busy", "event_msg": msg})
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": msg}]
+    })
+    return {"status": "event_triggered", "event_type": req.event_type, "message": msg}
+
+
+@app.post("/admin/agent/profile", dependencies=[Depends(verify_admin_token)])
+async def admin_change_profile(req: AdminProfileRequest):
+    """F05: Altera o perfil de IA de um agente ao vivo. Requer X-Admin-Token."""
+    from runtime.profiles import BUILTIN_PROFILES, get_profile
+    agent = next((a for a in world.agents if a.id == req.agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if req.profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil '{req.profile_id}' não encontrado. Disponíveis: {list(BUILTIN_PROFILES.keys())}")
+    old_profile = agent.profile_id
+    agent.profile_id = req.profile_id
+    profile = get_profile(req.profile_id)
+    agent.token_budget = profile.token_budget
+    agent.cooldown_ticks = profile.cooldown_ticks
+    logger.info(f"F05: Profile of {agent.name} changed {old_profile} → {req.profile_id}")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔄 Admin: {agent.name} trocou de perfil para '{req.profile_id}'"}]
+    })
+    return {"status": "profile_changed", "agent_id": req.agent_id, "old_profile": old_profile, "new_profile": req.profile_id}
+
+
+@app.get("/admin/world/state")
+async def admin_world_state(x_admin_token: str = Header(None)):
+    """F05: Retorna estado detalhado do mundo para admin (inclui todos os campos)."""
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(401, "Unauthorized")
+    state = world.get_state()
+    state["game_mode"] = world.game_mode
+    state["world_size"] = world.size
+    state["pending_spawns"] = len(world.pending_spawns)
+    state["thinking_agents"] = list(world.thinking_agents)
+    return state
+
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # T18 — Rate Limiting (slowapi)
