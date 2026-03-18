@@ -306,6 +306,20 @@ async function applyModeReset() {
     toast('Erro: ' + (e.detail || JSON.stringify(e)), 'err');
   }
 }
+// ── Quick Reset (usado pelos banners de pré-requisito) ──
+async function quickReset(mode) {
+  if (!requireToken()) return;
+  const pc = parseInt(document.getElementById('mode-players')?.value) || 4;
+  if (!confirm(`Quick Reset para "${mode}" com ${pc} agentes?`)) return;
+  try {
+    const res = await api('POST', '/reset', { game_mode: mode, player_count: pc });
+    showOut('mode-out', res);
+    toast('\u2713 Modo alterado para: ' + mode);
+    pollModeBadge();
+  } catch (e) {
+    toast('Erro no quick reset: ' + (e.detail || JSON.stringify(e)), 'err');
+  }
+}
 async function loadGincanaTemplates() {
   await callAndShow('gincana-templates-out', 'GET', '/gincana/templates');
 }
@@ -614,19 +628,34 @@ async function loadRateLimit() { await callAndShow('mem-out', 'GET', '/rate-limi
 // ══════════════════════════════════════════════════════
 async function pollModeBadge() {
   try {
-    const d = await apiGet('/modes/hybrid/state');
+    const d = await apiGet('/modes/hybrid/state').catch(() => null)
+           || await apiGet('/');
     const gm = d.game_mode || 'survival';
-    document.getElementById('mode-badge').textContent = gm;
-    // sync mode card
-    document.querySelectorAll('.mode-card').forEach(c => {
-      c.classList.toggle('selected', c.dataset.mode === gm);
-    });
+    // atualiza badge do header
+    const badge = document.getElementById('mode-badge');
+    if (badge) badge.textContent = gm;
+    // sincroniza cards de modo
+    document.querySelectorAll('.mode-card').forEach(c =>
+      c.classList.toggle('selected', c.dataset.mode === gm)
+    );
     selectedMode = gm;
+    // atualiza banners de pré-requisito
+    const wm = document.getElementById('prereq-warfare-mode');
+    if (wm) {
+      wm.textContent = gm;
+      wm.style.color = gm === 'warfare' ? 'var(--success)' : 'var(--warn)';
+    }
+    const em = document.getElementById('prereq-econ-mode');
+    if (em) {
+      em.textContent = gm;
+      em.style.color = ['economy','gangwar','hybrid'].includes(gm) ? 'var(--success)' : 'var(--warn)';
+    }
     document.getElementById('ws-dot').className = 'ok';
   } catch {
     try {
       const d = await apiGet('/');
-      document.getElementById('mode-badge').textContent = d.game_mode || '?';
+      const badge = document.getElementById('mode-badge');
+      if (badge) badge.textContent = d.game_mode || '?';
       document.getElementById('ws-dot').className = 'ok';
     } catch { document.getElementById('ws-dot').className = ''; }
   }
