@@ -417,6 +417,7 @@ async def reset_game(req: ResetRequest = ResetRequest()):
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
     world.reset_agents(Agent, player_count=req.player_count)
+    world.started = True  # Auto-start the newly reset world
     await manager.broadcast({"type": "reset", "data": world.get_state()})
     return {"status": "World reset successful", "player_count": req.player_count, "game_mode": game_mode, "session_id": _current_session_id}
 
