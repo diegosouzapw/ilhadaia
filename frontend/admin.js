@@ -7,14 +7,38 @@ const BASE = 'http://localhost:8001';
 
 // ── Token ─────────────────────────────────────────────
 function getToken() {
-  return document.getElementById('token-input').value ||
-    localStorage.getItem('bbia_admin_token') || '';
+  const el = document.getElementById('token-input');
+  return (el && el.value) || localStorage.getItem('bbia_admin_token') || '';
 }
-function saveToken(val) {
-  localStorage.setItem('bbia_admin_token', val);
+function saveToken() {
+  const val = document.getElementById('token-input').value.trim();
+  if (val) {
+    localStorage.setItem('bbia_admin_token', val);
+    toast('✓ Token salvo!', 'ok');
+    highlightToken(false);
+  }
+}
+function highlightToken(on) {
+  const el = document.getElementById('token-input');
+  if (!el) return;
+  el.style.borderColor = on ? '#ff5370' : '';
+  el.style.boxShadow = on ? '0 0 0 2px rgba(255,83,112,.4)' : '';
+}
+function requireToken() {
+  const t = getToken();
+  if (!t) {
+    toast('⚠️ Insira o Admin Token no campo acima!', 'err');
+    highlightToken(true);
+    document.getElementById('token-input').focus();
+    return false;
+  }
+  return true;
 }
 function adminHeaders() {
   return { 'Content-Type': 'application/json', 'X-Admin-Token': getToken() };
+}
+function publicHeaders() {
+  return { 'Content-Type': 'application/json' };
 }
 
 // ── Tab switching ──────────────────────────────────────
@@ -36,17 +60,19 @@ function toast(msg, type = 'ok') {
 }
 
 // ── Generic fetch helpers ──────────────────────────────
-async function api(method, path, body) {
-  const opts = { method, headers: adminHeaders() };
+async function api(method, path, body, headers) {
+  const opts = { method, headers: headers || adminHeaders() };
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(BASE + path, opts);
   const data = await r.json().catch(() => ({ error: 'parse error' }));
   if (!r.ok) throw data;
   return data;
 }
-async function apiGet(path) { return api('GET', path); }
+async function apiGet(path) { return api('GET', path, null, publicHeaders()); }
 async function apiPost(path, body) { return api('POST', path, body); }
 async function apiDelete(path) { return api('DELETE', path); }
+// POST público (não requer admin token)
+async function apiPostPublic(path, body) { return api('POST', path, body, publicHeaders()); }
 
 function showOut(id, data, isErr) {
   const el = document.getElementById(id);
@@ -82,15 +108,24 @@ async function loadServerStatus() {
 }
 
 async function resetWorld() {
+  if (!requireToken()) return;
   const mode = document.getElementById('reset-mode').value;
   const pc = parseInt(document.getElementById('reset-players').value) || 4;
   if (!confirm(`Resetar mundo para modo "${mode}" com ${pc} agentes?`)) return;
-  await callAndShow('reset-out', 'POST', '/reset', { game_mode: mode, player_count: pc });
-  document.getElementById('reset-out').style.display = 'block';
-  pollModeBadge();
+  try {
+    const res = await api('POST', '/reset', { game_mode: mode, player_count: pc });
+    showOut('reset-out', res);
+    document.getElementById('reset-out').style.display = 'block';
+    toast('\u2713 Reset OK \u2014 modo: ' + mode);
+    pollModeBadge();
+  } catch (e) {
+    showOut('reset-out', e, true);
+    toast('Erro no reset: ' + (e.detail || JSON.stringify(e)), 'err');
+  }
 }
 
 async function patchWorld() {
+  if (!requireToken()) return;
   const body = {};
   const started = document.getElementById('patch-started').value;
   const interval = document.getElementById('patch-ai-interval').value;
@@ -257,11 +292,19 @@ function selectMode(card) {
   selectedMode = card.dataset.mode;
 }
 async function applyModeReset() {
+  if (!requireToken()) return;
   const pc = parseInt(document.getElementById('mode-players').value) || 4;
   if (!confirm(`Reset para modo "${selectedMode}" com ${pc} agentes?`)) return;
-  await callAndShow('mode-out', 'POST', '/reset', { game_mode: selectedMode, player_count: pc });
-  document.getElementById('mode-out').style.display = 'block';
-  pollModeBadge();
+  try {
+    const res = await api('POST', '/reset', { game_mode: selectedMode, player_count: pc });
+    showOut('mode-out', res);
+    document.getElementById('mode-out').style.display = 'block';
+    toast('\u2713 Modo alterado para: ' + selectedMode);
+    pollModeBadge();
+  } catch (e) {
+    showOut('mode-out', e, true);
+    toast('Erro: ' + (e.detail || JSON.stringify(e)), 'err');
+  }
 }
 async function loadGincanaTemplates() {
   await callAndShow('gincana-templates-out', 'GET', '/gincana/templates');
@@ -599,7 +642,16 @@ function refreshAll() {
 // ── Init ──────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('bbia_admin_token');
-  if (saved) document.getElementById('token-input').value = saved;
+  const inp = document.getElementById('token-input');
+  if (saved && inp) inp.value = saved;
+  // salvar automaticamente ao digitar ou sair do campo
+  if (inp) {
+    inp.addEventListener('change', () => {
+      const v = inp.value.trim();
+      if (v) { localStorage.setItem('bbia_admin_token', v); highlightToken(false); }
+    });
+    inp.addEventListener('input', () => highlightToken(false));
+  }
   loadServerStatus();
   pollModeBadge();
   loadAgents();
