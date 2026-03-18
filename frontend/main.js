@@ -836,6 +836,28 @@ function updateWorld(data) {
     if (!data.game_over) {
         document.getElementById("tick-counter").textContent = data.ticks;
     }
+    // Atualizar badge de modo ativo (topo + painel lateral)
+    if (data.game_mode) {
+        const modeColors = {
+            survival: { bg: 'rgba(99,102,241,0.25)', color: '#a5b4fc', border: 'rgba(99,102,241,0.4)' },
+            gincana:  { bg: 'rgba(251,191,36,0.2)',  color: '#fbbf24', border: 'rgba(251,191,36,0.4)' },
+            warfare:  { bg: 'rgba(239,68,68,0.2)',   color: '#f87171', border: 'rgba(239,68,68,0.4)'  },
+            economy:  { bg: 'rgba(16,185,129,0.2)',  color: '#34d399', border: 'rgba(16,185,129,0.4)' },
+            gangwar:  { bg: 'rgba(168,85,247,0.2)',  color: '#c084fc', border: 'rgba(168,85,247,0.4)' },
+            hybrid:   { bg: 'rgba(245,158,11,0.2)',  color: '#fb923c', border: 'rgba(245,158,11,0.4)' },
+        };
+        const modeIcons = { survival:'🌴', gincana:'🏁', warfare:'⚔️', economy:'💰', gangwar:'💣', hybrid:'🔥' };
+        const c = modeColors[data.game_mode] || modeColors.survival;
+        const icon = modeIcons[data.game_mode] || '🎮';
+        const label = `${icon} ${data.game_mode}`;
+        [document.getElementById('game-mode-badge'), document.getElementById('sidebar-mode-badge')].forEach(el => {
+            if (!el) return;
+            el.textContent = label;
+            el.style.background = c.bg;
+            el.style.color = c.color;
+            el.style.border = `1px solid ${c.border}`;
+        });
+    }
     // Update day/night cycle
     if (data.day_cycle !== undefined) {
         currentDayCycle = data.day_cycle;

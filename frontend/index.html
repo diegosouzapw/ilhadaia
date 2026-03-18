@@ -29,7 +29,9 @@
         </div>
         <div id="time-display">
             <div class="time-line">
-                Dificuldade: Sobrevivência | Tick: <span id="tick-counter">0</span> | 
+                <span style="color:#94a3b8;font-size:12px">Modo:</span>
+                <span id="game-mode-badge" style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;background:rgba(99,102,241,0.25);color:#a5b4fc;border:1px solid rgba(99,102,241,0.4);letter-spacing:.3px;margin:0 4px">survival</span>
+                | Tick: <span id="tick-counter">0</span> |
                 <label style="cursor: pointer; background: #333; padding: 2px 5px; border-radius: 4px; border: 1px solid #555; font-size: 12px; vertical-align: middle;">
                     <input type="checkbox" id="fast-mode-checkbox" onchange="toggleFastMode(this.checked)"> Sem Intervalo
                 </label>
@@ -58,6 +60,12 @@
                 <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="0.5" oninput="updateVolume(this.value)">
             </div>
             <h3>Status do Servidor: <span id="ws-status" class="disconnected">Desconectado</span></h3>
+            <!-- Badge de modo no painel lateral -->
+            <div id="sidebar-mode-row" style="margin:6px 0 10px;display:flex;align-items:center;gap:8px">
+              <span style="font-size:12px;color:#94a3b8">Modo ativo:</span>
+              <span id="sidebar-mode-badge" style="padding:3px 12px;border-radius:20px;font-size:13px;font-weight:700;background:rgba(99,102,241,0.25);color:#a5b4fc;border:1px solid rgba(99,102,241,0.4)">survival</span>
+              <a href="admin.html" style="font-size:11px;color:#6366f1;text-decoration:none" title="Mudar modo no painel admin">⚙️ trocar</a>
+            </div>
             <ul id="agent-list">
                 <!-- Agent stats will populate here -->
             </ul>
