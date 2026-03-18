@@ -992,7 +992,7 @@ class World:
             self.economy.tick(events)
 
         # ── F20 — GangWar Engine ─────────────────────────────────────────────
-        if self.game_mode == "gangwar" and self.gangwar.active:
+        if self.game_mode in ("gangwar", "hybrid") and self.gangwar.active:
             self.gangwar.tick(events)
 
         return events
@@ -1593,7 +1593,7 @@ class World:
             # F10+F17+F18+F19 — Economy (sempre exposto independente de modo)
             "economy": self.economy.get_state(),
             # F20 — Guerra de Gangues
-            "gangwar": self.gangwar.get_state() if self.game_mode == "gangwar" else None,
+            "gangwar": self.gangwar.get_state() if self.game_mode in ("gangwar", "hybrid") else None,
         }
 
     def reset_agents(self, AgentClass, player_count=None):

@@ -1,5 +1,13 @@
 # F13 - WARFARE FACTIONS
 
+## Status de implementacao (2026-03-18)
+
+- Backend: concluido
+- Contratos de API: alinhados
+- Frontend: integrado na aba Feature Ops (`frontend/models.html`)
+- Referencia de fechamento: docs/features/IMPLEMENTATION_STATUS_2026-03-18.md
+
+
 ## Visao tecnica
 
 Esta task define a implementacao de `F13` no modo `warfare`.

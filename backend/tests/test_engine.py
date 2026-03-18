@@ -21,6 +21,7 @@ import tempfile
 import sqlite3
 import pytest
 import importlib
+import time
 
 
 # ══════════════════════════════════════════════════════════════
@@ -723,6 +724,39 @@ class TestAdminConsole:
             assert data["new_profile"] == "kimi-thinking"
             assert main.world.agents[0].profile_id == "kimi-thinking"
 
+    def test_admin_profile_change_by_path_alias(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            agent_id = main.world.agents[0].id
+            resp = client.post(
+                f"/admin/agent/{agent_id}/profile",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"profile_id": "kimi-thinking"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["agent_id"] == agent_id
+            assert main.world.agents[0].profile_id == "kimi-thinking"
+
+    def test_admin_world_patch_alias(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post(
+                "/admin/world/patch",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"ai_interval": 2, "event_chance": 0.01},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "patched"
+            assert data["applied"]["ai_interval"] == 2
+            assert data["applied"]["event_chance"] == 0.01
+
     def test_admin_world_state_without_token_returns_401(self):
         from fastapi.testclient import TestClient
         import main
@@ -896,6 +930,48 @@ class TestComparadorAB:
             data = resp.json()
             assert "results" in data
 
+    def test_benchmarks_alias_post_requires_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/benchmarks/ab", json={
+                "profile_a": "claude-kiro",
+                "profile_b": "claude-haiku",
+                "game_mode": "survival",
+                "ticks": 20,
+            })
+            assert resp.status_code == 401
+
+    def test_benchmarks_alias_run_and_report(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        run_id = f"run_alias_{time.time_ns()}"
+        main.session_store.record_ab_result(
+            run_id=run_id,
+            session_id="manual-test",
+            profile_a="claude-kiro",
+            profile_b="claude-haiku",
+            score_a=120.0,
+            score_b=80.0,
+            ticks_a=200,
+            ticks_b=200,
+            tokens_a=5000,
+            tokens_b=3500,
+            game_mode="survival",
+        )
+        with TestClient(main.app) as client:
+            resp = client.get(f"/benchmarks/ab/{run_id}")
+            assert resp.status_code == 200
+            assert resp.json()["run"]["run_id"] == run_id
+
+            report = client.get(f"/benchmarks/ab/{run_id}/report")
+            assert report.status_code == 200
+            body = report.json()
+            assert body["report"]["run_id"] == run_id
+            assert "efficiency" in body["report"]
+
 
 # ══════════════════════════════════════════════════════════════
 # F09 — Versionamento de Perfis
@@ -984,6 +1060,27 @@ class TestVersionamentoPerfis:
             assert data["version"] >= 1
             assert data["snapshot"]["temperature"] == 0.85
 
+    def test_activate_profile_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            save = client.post(
+                "/profiles/claude-kiro/versions",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"note": "versão para ativar", "temperature": 0.77},
+            )
+            assert save.status_code == 200
+            version = save.json()["version"]
+
+            activate = client.post(
+                f"/profiles/claude-kiro/activate/{version}",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+            )
+            assert activate.status_code == 200
+            assert activate.json()["status"] == "rolled_back"
+
 
 # ══════════════════════════════════════════════════════════════
 # F04 — Eventos Dinâmicos da Ilha
@@ -1053,6 +1150,10 @@ class TestEventosDinamicos:
             assert resp2.status_code == 200
             assert "event_types" in resp2.json()
 
+            resp3 = client.get("/events/templates")
+            assert resp3.status_code == 200
+            assert "event_types" in resp3.json()
+
 
 # ══════════════════════════════════════════════════════════════
 # F07 — Reputação Social e Alianças
@@ -1118,6 +1219,24 @@ class TestReputacaoSocial:
                 assert resp.status_code == 200
                 data = resp.json()
                 assert "reputation_score" in data
+
+    def test_alliances_and_betray_alias_endpoints(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        agent_a = main.world.agents[0]
+        agent_b = main.world.agents[1]
+        with TestClient(main.app) as client:
+            ally = client.post(
+                f"/agents/{agent_a.id}/alliances",
+                json={"agent_b_name": agent_b.name},
+            )
+            assert ally.status_code == 200
+            assert "alliance" in ally.json()
+
+            betray = client.post(f"/agents/{agent_a.id}/betray")
+            assert betray.status_code == 200
+            assert betray.json()["status"] == "alliance_broken"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1187,6 +1306,17 @@ class TestMissoesIndividuais:
             data = resp.json()
             assert data["count"] == 8
             assert len(data["missions"]) == 8
+
+    def test_missions_templates_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/missions/templates")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["count"] == 8
+            assert "missions" in data
 
     def test_missions_progress_endpoint(self):
         from fastapi.testclient import TestClient
@@ -1310,6 +1440,15 @@ class TestModoGincana:
             assert "templates" in data
             assert len(data["templates"]) >= 3
 
+    def test_modes_gincana_templates_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/modes/gincana/templates")
+            assert resp.status_code == 200
+            assert "templates" in resp.json()
+
     def test_gincana_start_endpoint_requires_gincana_mode(self):
         from fastapi.testclient import TestClient
         import main
@@ -1321,6 +1460,19 @@ class TestModoGincana:
                                headers={"X-Admin-Token": main.ADMIN_TOKEN},
                                json={})
             # Survival mode → 400
+            assert resp.status_code == 400
+
+    def test_modes_gincana_start_alias_requires_gincana_mode(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post(
+                "/modes/gincana/start",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={},
+            )
             assert resp.status_code == 400
 
     def test_get_state_includes_gincana_field(self):
@@ -1445,6 +1597,15 @@ class TestWarfare:
             data = resp.json()
             assert "warfare" in data
 
+    def test_modes_warfare_state_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/modes/warfare/state")
+            assert resp.status_code == 200
+            assert "warfare" in resp.json()
+
     def test_warfare_territory_endpoint(self):
         from fastapi.testclient import TestClient
         import main
@@ -1456,6 +1617,61 @@ class TestWarfare:
             assert "territory_holder" in data
             assert "faction_scores" in data
 
+    def test_actions_throw_alias_validation(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/actions/throw", json={})
+            assert resp.status_code == 422
+
+    def test_combat_config_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/combat/config")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "throw" in data
+            assert "roles" in data
+
+    def test_teams_roles_and_zones_endpoints(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            reset = client.post(
+                "/reset",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"game_mode": "warfare", "player_count": 4},
+            )
+            assert reset.status_code == 200
+
+            start = client.post(
+                "/warfare/start",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={},
+            )
+            assert start.status_code == 200
+
+            roles = client.get("/teams/alpha/roles")
+            assert roles.status_code == 200
+            assert roles.json()["team_id"] == "alpha"
+
+            rebalance = client.post("/teams/alpha/roles", json={})
+            assert rebalance.status_code == 200
+            assert rebalance.json()["team_id"] == "alpha"
+
+            zones = client.get("/zones/state")
+            assert zones.status_code == 200
+            assert "territory_holder" in zones.json()
+
+            zone_cfg = client.post("/zones/config", json={"name": "Zona Teste"})
+            assert zone_cfg.status_code == 200
+            assert zone_cfg.json()["zone"]["name"] == "Zona Teste"
+
     def test_warfare_start_requires_warfare_mode(self):
         from fastapi.testclient import TestClient
         import main
@@ -1466,6 +1682,19 @@ class TestWarfare:
                                headers={"X-Admin-Token": main.ADMIN_TOKEN},
                                json={})
             # Modo padrão é survival → 400
+            assert resp.status_code == 400
+
+    def test_modes_warfare_start_alias_requires_warfare_mode(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            resp = client.post(
+                "/modes/warfare/start",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={},
+            )
             assert resp.status_code == 400
 
     def test_get_state_includes_warfare_field_in_warfare_mode(self):
@@ -1528,6 +1757,55 @@ class TestEconomiaCrafting:
         agent = w.agents[0]
         events = []
         result = w.economy.craft(agent.id, "nuke", events)
+        assert "error" in result
+
+    def test_build_wall_consumes_ingredients_and_spawns_structure(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = ["stone", "stone"]
+        target = None
+        for y in range(w.size):
+            for x in range(w.size):
+                occupied = any(
+                    e.get("x") == x and e.get("y") == y and e.get("type") in {"agent", "wall", "raft"}
+                    for e in w.entities.values()
+                )
+                if w._is_walkable(x, y) and not occupied:
+                    target = (x, y)
+                    break
+            if target:
+                break
+        assert target is not None
+
+        events = []
+        result = w.economy.build(agent.id, "wall", target[0], target[1], events)
+        assert "error" not in result
+        assert agent.inventory.count("stone") == 0
+        assert any(e.get("type") == "wall" and e.get("x") == target[0] and e.get("y") == target[1] for e in w.entities.values())
+        assert any(ev.get("action") == "build" for ev in events)
+
+    def test_build_raft_requires_water_tile(self):
+        w = self._make_econ_world()
+        agent = w.agents[0]
+        agent.inventory = ["raft"]  # usa item craftado para isolar validação de terreno
+        non_water_target = None
+        for y in range(w.size):
+            for x in range(w.size):
+                tile_types = [
+                    e.get("type")
+                    for e in w.entities.values()
+                    if e.get("x") == x and e.get("y") == y
+                ]
+                occupied = any(t in {"agent", "wall", "raft"} for t in tile_types)
+                if w._is_walkable(x, y) and "water" not in tile_types and not occupied:
+                    non_water_target = (x, y)
+                    break
+            if non_water_target:
+                break
+        assert non_water_target is not None
+
+        events = []
+        result = w.economy.build(agent.id, "raft", non_water_target[0], non_water_target[1], events)
         assert "error" in result
 
     # F17 — Trade
@@ -1642,6 +1920,52 @@ class TestEconomiaCrafting:
             data = resp.json()
             assert "axe" in data["recipes"]
             assert "bandage" in data["recipes"]
+
+    def test_recipes_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/recipes")
+            assert resp.status_code == 200
+            assert "recipes" in resp.json()
+
+    def test_build_alias_endpoint_exists(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/build", json={
+                "agent_id": "missing-agent",
+                "structure_type": "wall",
+                "x": 1,
+                "y": 1,
+            })
+            # Endpoint existe; erro é de domínio (agente inexistente), não 404
+            assert resp.status_code == 400
+
+    def test_market_recalculate_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/market/recalculate")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "prices" in data
+            assert "stock" in data
+
+    def test_modes_economy_alias_start_and_state_endpoints(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            start = client.post("/modes/economy/start", headers={"X-Admin-Token": main.ADMIN_TOKEN}, json={})
+            assert start.status_code == 200
+            state = client.get("/modes/economy/state")
+            assert state.status_code == 200
+            assert "economy" in state.json()
 
     def test_economy_market_endpoint(self):
         from fastapi.testclient import TestClient
@@ -1967,6 +2291,41 @@ class TestGuerraDeGangues:
             assert resp.status_code == 200
             assert "gangwar" in resp.json()
 
+    def test_hybrid_alias_endpoints_start_and_state(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        app = main.app
+        with TestClient(app) as client:
+            reset = client.post(
+                "/reset",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"game_mode": "hybrid", "player_count": 4},
+            )
+            assert reset.status_code == 200
+
+            start = client.post(
+                "/modes/hybrid/start",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"max_ticks": 120},
+            )
+            assert start.status_code == 200
+            assert "gangwar" in start.json()
+
+            state = client.get("/modes/hybrid/state")
+            assert state.status_code == 200
+            state_data = state.json()
+            assert state_data["game_mode"] == "hybrid"
+            assert state_data["gangwar"]["active"] is True
+
+    def test_hybrid_alias_state_requires_hybrid_mode(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.get("/modes/hybrid/state")
+            assert resp.status_code == 400
+
     def test_gangwar_bm_prices_endpoint(self):
         from fastapi.testclient import TestClient
         import main
@@ -1985,6 +2344,13 @@ class TestGuerraDeGangues:
         assert "gangwar" in state
         assert state["gangwar"] is not None
         assert "gang_scores" in state["gangwar"]
+
+    def test_get_state_includes_gangwar_in_hybrid_mode(self):
+        from world import World
+        w = World(size=44, game_mode="hybrid")
+        state = w.get_state()
+        assert "gangwar" in state
+        assert state["gangwar"] is not None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2077,6 +2443,54 @@ class TestWebhooksExpandidos:
             assert "valid_events" in data
             assert "agent_dead" in data["valid_events"]
             assert "gangwar_end" in data["valid_events"]
+
+    def test_webhooks_register_alias_endpoint(self):
+        from fastapi.testclient import TestClient
+        import main
+        app = importlib.reload(main).app
+        with TestClient(app) as client:
+            resp = client.post("/webhooks", json={
+                "owner_id": "owner_alias",
+                "url": "https://example.com/webhook",
+                "events": ["trade"],
+                "secret": "",
+            })
+            assert resp.status_code == 200
+            assert "webhook_id" in resp.json()
+
+    def test_webhooks_test_alias_endpoint_with_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        with TestClient(main.app) as client:
+            # Garante owner com webhook para disparo de teste
+            client.post("/webhooks", json={
+                "owner_id": "owner_for_test",
+                "url": "https://example.com/webhook-test",
+                "events": ["all"],
+                "secret": "",
+            })
+            resp = client.post(
+                "/webhooks/test",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+                json={"owner_id": "owner_for_test"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "fired"
+
+    def test_webhooks_deliveries_alias_endpoint_with_admin(self):
+        from fastapi.testclient import TestClient
+        import main
+        main = importlib.reload(main)
+        with TestClient(main.app) as client:
+            resp = client.get(
+                "/webhooks/deliveries",
+                headers={"X-Admin-Token": main.ADMIN_TOKEN},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "count" in data
+            assert "deliveries" in data
 
     def test_webhooks_stats_endpoint_accessible(self):
         from fastapi.testclient import TestClient

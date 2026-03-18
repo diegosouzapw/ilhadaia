@@ -1,13 +1,19 @@
 # Tasks por Feature - BBBia
 
-Este diretorio organiza o desenvolvimento tecnico por feature, com um arquivo por task.
+Atualizado em: 2026-03-18
 
-Arquivos base:
+Este diretorio organiza a implementacao das features F01..F20 e os artefatos de fechamento.
+
+## Arquivos base de fechamento
 
 - `00_FINAL_IMPLEMENTATION_PLAN.md`
 - `CHECKLIST.md`
+- `IMPLEMENTATION_STATUS_2026-03-18.md`
+- `FRONTEND_QA_CHECKLIST_2026-03-18.md`
+- `FRONTEND_ENDPOINT_COVERAGE_2026-03-18.md`
+- Roteiro operacional UI: `frontend/models.html` (aba `Feature Ops`)
 
-Arquivos por feature:
+## Arquivos por feature
 
 - `F01_MODE_COMMANDER.md`
 - `F02_AB_PROFILE_BENCHMARK.md`
@@ -30,9 +36,10 @@ Arquivos por feature:
 - `F19_CONTRACTS_REPUTATION.md`
 - `F20_GANG_WAR_HYBRID.md`
 
-Uso recomendado:
+## Ordem recomendada de uso
 
-1. selecionar a proxima feature no `CHECKLIST.md`
-2. abrir o arquivo da feature
-3. implementar seguindo os blocos tecnicos e criterios de aceite
-4. atualizar status no checklist
+1. Ler `00_FINAL_IMPLEMENTATION_PLAN.md`.
+2. Verificar status em `CHECKLIST.md`.
+3. Conferir fechamento tecnico em `IMPLEMENTATION_STATUS_2026-03-18.md`.
+4. Usar a aba `Feature Ops` para operar F01..F20 no frontend.
+5. Executar QA + evidencias para fechar pendencias.

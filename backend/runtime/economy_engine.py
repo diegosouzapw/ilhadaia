@@ -179,6 +179,96 @@ class EconomyEngine:
         logger.info(f"F10: {agent.name} crafted {recipe_name}")
         return record
 
+    def build(self, agent_id: str, structure_type: str, x: int, y: int, events: list) -> Dict:
+        """Constrói uma estrutura no mapa consumindo item craftado ou ingredientes da receita."""
+        agent = next((a for a in self.world.agents if a.id == agent_id and a.is_alive), None)
+        if not agent:
+            return {"error": "Agente não encontrado"}
+
+        if structure_type not in STRUCTURES:
+            return {"error": f"Estrutura inválida '{structure_type}'. Válidas: {sorted(STRUCTURES)}"}
+
+        if not (0 <= x < self.world.size and 0 <= y < self.world.size):
+            return {"error": f"Coordenadas fora do mapa ({self.world.size}x{self.world.size})"}
+
+        # Não permitir sobreposição com agentes/estruturas já presentes.
+        occupied = any(
+            e.get("x") == x and e.get("y") == y and e.get("type") in {"agent", "wall", "raft"}
+            for e in self.world.entities.values()
+        )
+        if occupied:
+            return {"error": "Posição ocupada por outra entidade"}
+
+        # Parede exige tile caminhável; jangada exige água.
+        tile_types = [
+            e.get("type")
+            for e in self.world.entities.values()
+            if e.get("x") == x and e.get("y") == y
+        ]
+        if structure_type == "wall":
+            if not self.world._is_walkable(x, y):
+                return {"error": "Parede só pode ser construída em tile caminhável livre"}
+        elif structure_type == "raft":
+            if "water" not in tile_types:
+                return {"error": "Jangada só pode ser construída em tile de água"}
+
+        consumed_mode = ""
+        if structure_type in agent.inventory:
+            agent.inventory.remove(structure_type)
+            consumed_mode = "crafted_item"
+        else:
+            recipe = RECIPES.get(structure_type)
+            if not recipe:
+                return {"error": f"Receita não encontrada para '{structure_type}'"}
+
+            inv_counts: Dict[str, int] = {}
+            for item in agent.inventory:
+                inv_counts[item] = inv_counts.get(item, 0) + 1
+
+            for ingredient, qty_needed in recipe["ingredients"].items():
+                if inv_counts.get(ingredient, 0) < qty_needed:
+                    return {"error": f"Ingredientes insuficientes para construir {structure_type}"}
+
+            for ingredient, qty_needed in recipe["ingredients"].items():
+                removed = 0
+                new_inv = []
+                for item in agent.inventory:
+                    if item == ingredient and removed < qty_needed:
+                        removed += 1
+                    else:
+                        new_inv.append(item)
+                agent.inventory = new_inv
+            consumed_mode = "recipe_ingredients"
+
+        entity_id = f"built_{structure_type}_{self.world.ticks}_{x}_{y}"
+        self.world.entities[entity_id] = {
+            "type": structure_type,
+            "x": x,
+            "y": y,
+            "built_by": agent.name,
+            "builder_id": agent.id,
+            "tick": self.world.ticks,
+        }
+
+        record = {
+            "agent_id": agent.id,
+            "agent": agent.name,
+            "structure": structure_type,
+            "x": x,
+            "y": y,
+            "entity_id": entity_id,
+            "consumed": consumed_mode,
+            "tick": self.world.ticks,
+        }
+        events.append({
+            "agent_id": agent.id,
+            "name": agent.name,
+            "action": "build",
+            "event_msg": f"🧱 {agent.name} construiu {structure_type} em ({x},{y})"
+        })
+        logger.info("F10: %s built %s at %s,%s (%s)", agent.name, structure_type, x, y, consumed_mode)
+        return record
+
     # ─── F17 — Comércio entre agentes ────────────────────────────────────────
 
     def trade(self, seller_id: str, buyer_id: str, item: str, price: float, events: list) -> Dict:
@@ -223,6 +313,16 @@ class EconomyEngine:
             ratio = stock / max(base_stock, 1)
             # ratio < 1 → escassez → preço sobe; ratio > 1 → excesso → preço cai
             self.market_prices[item] = round(base * max(0.5, min(3.0, 1.0 / max(ratio, 0.1))), 2)
+
+    def recalculate_market(self, reason: str = "manual") -> Dict[str, Any]:
+        """Força recálculo dos preços e retorna snapshot atualizado do mercado."""
+        self._recalc_prices()
+        return {
+            "reason": reason,
+            "tick": self.world.ticks,
+            "prices": dict(self.market_prices),
+            "stock": dict(self.market_stock),
+        }
 
     def market_buy(self, agent_id: str, item: str, qty: int, events: list) -> Dict:
         """Agente compra qty unidades de item do mercado central."""
