@@ -61,6 +61,7 @@ O comando deve ser executado a partir de `backend/`. Com isso, os paths relativo
 
 ```env
 ADMIN_TOKEN=troque-este-token
+AUTHORIZED_IDS=777
 OMNIROUTER_URL=http://192.168.0.15:20128/v1
 OMNIROUTER_API_KEY=omniroute-local
 ALLOWED_ORIGINS=*
@@ -72,6 +73,22 @@ GEMINI_API_KEY=sua_chave_gemini_aqui
 - `POST /agents/register` usa `claude-kiro` como default quando `profile_id` não é enviado.
 - Os quatro NPCs iniciais da ilha usam: `claude-kiro`, `kimi-thinking`, `kimi-groq`, `claude-haiku`.
 - O backend também aceita `OMNIROUTE_API_KEY` e `OPENAI_BASE_URL`/`OPENAI_API_KEY` como aliases.
+
+> **`POST /reset` exige `X-Admin-Token`** — não é um endpoint público. Sem o header, retorna 401.
+> No painel admin, cole o token no campo superior direito; ele salva em `localStorage` e destaca vermelho se estiver vazio.
+
+## Modos de Jogo — Status de Validação (2026-03-18)
+
+Todos os 6 modos testados e confirmados funcionais com `POST /reset` + token:
+
+| Modo | Status |
+|------|--------|
+| `survival` | ✅ OK |
+| `gincana` | ✅ OK |
+| `warfare` | ✅ OK |
+| `economy` | ✅ OK |
+| `gangwar` | ✅ OK |
+| `hybrid` | ✅ OK |
 
 ## Interfaces Web
 

@@ -4,7 +4,10 @@ Atualizado em: 2026-03-18
 
 Base URL: `http://localhost:8001`
 
-Autenticacao de admin: header `X-Admin-Token: <ADMIN_TOKEN>`
+Autenticacao de admin: header `X-Admin-Token: <ADMIN_TOKEN>` (valor definido em `.env: ADMIN_TOKEN`)
+
+> **Importante:** `POST /reset` **tambem exige** `X-Admin-Token`. Nao e um endpoint publico.
+> Todos os endpoints marcados com `(admin)` abaixo e os de controle de sessao (`/reset`) exigem o header.
 
 ## Convencoes
 
@@ -27,6 +30,8 @@ Sequencia recomendada:
    - `GET /agents/all`
 3. Operar pela UI (recomendado):
    - `frontend/admin.html` → painel gerencial com **8 abas** cobrindo F01-F20 (requer ADMIN_TOKEN)
+     - Cole o token no campo superior direito; ele salva automaticamente em `localStorage`
+     - Se o campo estiver vazio, ele fica vermelho e o foco vai para ele automaticamente
    - `frontend/models.html` → aba `Feature Ops` (cobertura funcional dos contratos F01..F20)
 4. Executar fluxo de feature desejado:
    - F01/F03/F05: `command`, `decisions/memory`, `admin/*`
