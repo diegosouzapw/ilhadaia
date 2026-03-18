@@ -1,10 +1,11 @@
 # BBBia: A Ilha da IA
 
-BBBia é um simulador de sobrevivência social com benchmark de modelos de IA. O backend FastAPI executa o mundo, expõe REST + WebSocket e serve três interfaces web:
+BBBia é um simulador de sobrevivência social com benchmark de modelos de IA. O backend FastAPI executa o mundo, expõe REST + WebSocket e serve **quatro interfaces web**:
 
 - `frontend/index.html`: observer 3D da ilha em tempo real
 - `frontend/dashboard.html`: dashboard analítico de sessões, score e exportações
 - `frontend/models.html`: console para testar perfis, cadastrar agentes e inspecionar o runtime
+- `frontend/admin.html`: **painel gerencial completo** — cobre todas as features F01-F20 (8 abas: mundo, agentes, modos, warfare, economia, webhooks, benchmark e avançado)
 
 ## Modos de Jogo
 
@@ -74,13 +75,29 @@ GEMINI_API_KEY=sua_chave_gemini_aqui
 
 ## Interfaces Web
 
-| Interface | URL |
-|-----------|-----|
-| Ilha ao vivo | `http://localhost:8001/frontend/index.html` |
-| Dashboard | `http://localhost:8001/frontend/dashboard.html` |
-| Modelos | `http://localhost:8001/frontend/models.html` |
+| Interface | URL | Descrição |
+|-----------|-----|----------|
+| Ilha ao vivo | `http://localhost:8001/frontend/index.html` | Observer 3D com WebSocket, replay e benchmark ao vivo |
+| Dashboard | `http://localhost:8001/frontend/dashboard.html` | Métricas, gráficos, scoreboard global e exportações |
+| Modelos | `http://localhost:8001/frontend/models.html` | Perfis de IA, teste de modelos e registro de agentes |
+| **Admin** | `http://localhost:8001/frontend/admin.html` | **Painel gerencial completo** — 8 abas cobrindo F01-F20 |
 
-Não abra os arquivos `.html` por `file://`. Sirva tudo via `/frontend/` para manter WebSocket e fetches no mesmo host.
+> Não abra os arquivos `.html` por `file://`. Sirva tudo via `/frontend/` para manter WebSocket e fetches no mesmo host.
+
+### Painel Admin — 8 Abas
+
+| Aba | Features |
+|-----|----------|
+| 🌍 Mundo | Reset de modo, patch ao vivo, spawn, eventos admin, sessões |
+| 🤖 Agentes | Lista ao vivo, registro, F01 Comandante, F03 Inspector, F07 Aliança/Reputação |
+| 🎮 Modos | Seletor visual de game_mode com cards interativos |
+| ⚔️ Warfare | F12-F16: gincana, warfare, arremesso, papéis táticos, território |
+| 💰 Economia | F10/F17-F20: craft, trade, mercado, contratos, GangWar, black market |
+| 🔔 Webhooks | F11: registro, teste, histórico de entregas, stats |
+| 📊 Benchmark | F02/F06/F09: comparador A/B, temporadas, ELO, versões de perfil |
+| 🧠 Avançado | Torneios, eventos dinâmicos F04, missões F08, memórias, rate limit |
+
+**Autenticação:** Cole o `ADMIN_TOKEN` no campo do canto superior direito do painel. O token é salvo automaticamente em `localStorage`.
 
 ## Perfis de IA
 

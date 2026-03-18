@@ -25,8 +25,9 @@ Sequencia recomendada:
    - `POST /reset` com `player_count` e `game_mode`
 2. Obter agentes:
    - `GET /agents/all`
-3. Operar pela UI (opcional):
-   - `frontend/models.html` -> aba `Feature Ops` (cobertura funcional dos contratos F01..F20)
+3. Operar pela UI (recomendado):
+   - `frontend/admin.html` → painel gerencial com **8 abas** cobrindo F01-F20 (requer ADMIN_TOKEN)
+   - `frontend/models.html` → aba `Feature Ops` (cobertura funcional dos contratos F01..F20)
 4. Executar fluxo de feature desejado:
    - F01/F03/F05: `command`, `decisions/memory`, `admin/*`
    - F12: reset `gincana` + `POST /modes/gincana/start`

@@ -4,7 +4,7 @@ Atualizado em: 2026-03-18
 
 ## Resumo
 
-O BBBia roda com backend FastAPI (single worker), loop de simulacao em `World`, engines de modo (`GincanaEngine`, `WarfareEngine`, `EconomyEngine`, `GangWarEngine`), persistencia SQLite WAL e frontend web em tres telas (`index.html`, `dashboard.html`, `models.html`).
+O BBBia roda com backend FastAPI (single worker), loop de simulacao em `World`, engines de modo (`GincanaEngine`, `WarfareEngine`, `EconomyEngine`, `GangWarEngine`), persistencia SQLite WAL e frontend web em **quatro telas** (`index.html`, `dashboard.html`, `models.html`, `admin.html`).
 
 Estado tecnico confirmado nesta data:
 
@@ -16,7 +16,7 @@ Estado tecnico confirmado nesta data:
 ## Topologia atual
 
 ```text
-Frontend (index/dashboard/models)
+Frontend (index/dashboard/models/admin)
   | HTTP REST + WebSocket /ws
   v
 FastAPI (backend/main.py)
@@ -109,6 +109,28 @@ tick -> World escolhe agentes elegiveis
   - `/webhooks/admin/history`
   - `/webhooks/admin/stats`
   - `/webhooks/admin/event-types`
+
+## Frontend (quatro telas)
+
+| Tela | Arquivo | Funcao |
+|------|---------|--------|
+| Ilha | `frontend/index.html` | Observer 3D, chat, replay, WebSocket |
+| Dashboard | `frontend/dashboard.html` | Metricas, graficos, scoreboard, exportacao |
+| Modelos | `frontend/models.html` | Perfis, teste de modelos, Feature Ops |
+| **Admin** | `frontend/admin.html` | **Painel gerencial completo** (8 abas, F01-F20) |
+
+### admin.html — Abas e Features
+
+| Aba | Features cobertas |
+|-----|------------------|
+| Mundo | Reset, patch, spawn, eventos admin, sessoes |
+| Agentes | Lista ao vivo, F01, F03, F07, troca de perfil |
+| Modos | Seletor visual de game_mode |
+| Warfare | F12-F16: gincana, warfare, throw, roles, territorio |
+| Economia | F10/F17-F20: craft, trade, mercado, contratos, gangwar |
+| Webhooks | F11: registro, teste, entregas, stats |
+| Benchmark | F02/F06/F09: A/B, temporadas, ELO, versoes |
+| Avancado | Torneios, F04, F08, memorias, rate limit |
 
 ## Limites atuais da arquitetura
 
