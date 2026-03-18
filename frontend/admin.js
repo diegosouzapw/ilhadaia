@@ -167,8 +167,9 @@ async function loadSessions() {
   await callAndShow('sessions-out', 'GET', '/sessions');
 }
 
+console.log('✅ admin.js CARREGADO — Versão: POST/reset Headers v3');
 // ══════════════════════════════════════════════════════
-//  AGENTES
+//  STATE & INITIALIZATIONES
 // ══════════════════════════════════════════════════════
 async function loadAgents() {
   try {
@@ -628,8 +629,7 @@ async function loadRateLimit() { await callAndShow('mem-out', 'GET', '/rate-limi
 // ══════════════════════════════════════════════════════
 async function pollModeBadge() {
   try {
-    const d = await apiGet('/modes/hybrid/state').catch(() => null)
-           || await apiGet('/');
+    const d = await apiGet('/');
     const gm = d.game_mode || 'survival';
     // atualiza badge do header
     const badge = document.getElementById('mode-badge');
