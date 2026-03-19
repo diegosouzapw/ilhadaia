@@ -957,6 +957,7 @@ class World:
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
                     if agent.is_alive and not getattr(agent, 'is_remote', False) and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
                         context = self._get_context_for_agent(agent)
+                        agent._game_mode = self.game_mode  # Thinker usa para variar prompt
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
         else:
             if self.ticks % self.ai_interval == 0 and self.agents and not self.game_over:
@@ -975,6 +976,7 @@ class World:
                     if not getattr(agent, 'is_remote', False) and agent.id not in self.thinking_agents and not is_walking and not just_arrived:
                         logger.info(f"==> DISPATCHING AI TASK para {agent.name}")
                         context = self._get_context_for_agent(agent)
+                        agent._game_mode = self.game_mode  # Thinker usa para variar prompt
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
 
         # ── F04/F07/F08 — Motores de fase 3 ──────────────────────────────────
@@ -1166,7 +1168,7 @@ class World:
             agent.command_source = "ai"
             human_command = None
 
-        return {
+        context = {
             "time": self.ticks,
             "is_night": is_night,
             "ai_provider": self.ai_provider,
@@ -1185,6 +1187,68 @@ class World:
             "command_source": getattr(agent, "command_source", "ai"),
             "game_mode": self.game_mode,
         }
+
+        # ── Injeta info específica do engine ativo ──
+        if self.game_mode == "warfare" and self.warfare.active:
+            wf_faction = self.warfare.agent_factions.get(agent.id)
+            wf_role = self.warfare.agent_roles.get(agent.id)
+            context["warfare_info"] = {
+                "faction": wf_faction,
+                "role": wf_role,
+                "alpha_score": self.warfare.faction_scores.get("alpha", 0),
+                "beta_score": self.warfare.faction_scores.get("beta", 0),
+                "alpha_base_hp": self.warfare.base_hp.get("alpha", 100),
+                "beta_base_hp": self.warfare.base_hp.get("beta", 100),
+                "territory_holder": self.warfare.territory_holder,
+                "territory_ticks": self.warfare.territory_contest_ticks,
+                "throws": len(self.warfare.throw_log),
+            }
+            # Info extra para reachable_now
+            enemy_faction = "beta" if wf_faction == "alpha" else "alpha"
+            for v in visible_entities:
+                if v.get("type") == "agent":
+                    v_faction = self.warfare.agent_factions.get(v.get("id", ""))
+                    if v_faction:
+                        v["faction"] = v_faction
+                        v["is_enemy"] = v_faction != wf_faction
+
+        elif self.game_mode == "gincana" and self.gincana.active:
+            captured_count = sum(1 for v in self.gincana.checkpoints_captured.values() if v is not None)
+            total_cps = len(self.gincana.checkpoints_captured)
+            context["gincana_info"] = {
+                "checkpoints_status": f"{captured_count}/{total_cps}",
+                "artifact_collected": self.gincana.artifact_holder is not None,
+                "artifact_holder": self.gincana.artifact_holder,
+                "delivery_done": len(self.gincana.deliveries) > 0,
+                "remaining_ticks": self.gincana.remaining_ticks(),
+                "my_score": self.gincana.gincana_scores.get(agent.id, 0),
+            }
+            # Marca checkpoints visíveis como capturados ou não
+            for v in visible_entities:
+                if v.get("type") == "checkpoint":
+                    cp_id = next((eid for eid, e in self.entities.items() if e is v), None)
+                    if cp_id:
+                        v["captured"] = self.gincana.checkpoints_captured.get(cp_id) is not None
+
+        elif self.game_mode == "economy" and self.economy.active:
+            context["economy_info"] = {
+                "balance": self.economy.coins.get(agent.id, 0),
+                "recipes": ", ".join(self.economy.recipes.keys()) if hasattr(self.economy, 'recipes') else "axe, raft, wall, torch, bandage",
+                "market_summary": "Vá até um Mercado para ver preços",
+                "contracts_count": len(getattr(self.economy, 'active_contracts', [])),
+            }
+
+        elif self.game_mode in ("gangwar", "hybrid") and self.gangwar.active:
+            gw_gang = self.gangwar.agent_gangs.get(agent.id)
+            context["gangwar_info"] = {
+                "faction": gw_gang,
+                "faction_scores": self.gangwar.gang_scores,
+                "depot_alpha_hp": sum(self.gangwar.depots.get("alpha", {}).values()),
+                "depot_beta_hp": sum(self.gangwar.depots.get("beta", {}).values()),
+                "bm_prices": self.gangwar.bm_prices,
+            }
+
+        return context
 
         
     def _is_walkable(self, x, y):
