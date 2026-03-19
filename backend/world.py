@@ -1643,4 +1643,20 @@ class World:
         self.tournament_end_tick = None
         self.active_tournament_id = None
         self._init_map()
-        logger.info("World reset triggered with house spawns.")
+        # Auto-start do engine do modo ativo; desativar engines de modos anteriores
+        self.gincana.active = False
+        self.warfare.active = False
+        self.economy.active = False
+        self.gangwar.active = False
+        if self.game_mode == "gincana":
+            self.gincana.start()
+        elif self.game_mode == "warfare":
+            self.warfare.start()
+        elif self.game_mode == "economy":
+            self.economy.start()
+        elif self.game_mode in ("gangwar", "hybrid"):
+            self.gangwar.start()
+        # Economy sempre roda em paralelo (crafting disponível em qualquer modo)
+        if self.game_mode != "economy":
+            self.economy.start()
+        logger.info(f"World reset triggered with house spawns. Mode engine '{self.game_mode}' auto-started.")

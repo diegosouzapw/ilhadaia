@@ -583,6 +583,297 @@ function createCemeteryArea() {
     return group;
 }
 
+// ══════════════════════════════════════════════════════
+//  MODE-SPECIFIC ENTITY CREATORS (F12–F20)
+// ══════════════════════════════════════════════════════
+
+// ── Materials para modos ───────────────────────────────
+const matCheckpoint = new THREE.MeshPhongMaterial({ color: 0xFFD700, emissive: 0x332600, shininess: 80 });
+const matArtifact   = new THREE.MeshPhongMaterial({ color: 0xE040FB, emissive: 0x3A0038, shininess: 100 });
+const matDelivery   = new THREE.MeshPhongMaterial({ color: 0x00E676, emissive: 0x002200, shininess: 60 });
+const matBaseAlpha  = new THREE.MeshLambertMaterial({ color: 0x2196F3 });
+const matBaseBeta   = new THREE.MeshLambertMaterial({ color: 0xF44336 });
+const matControlZone= new THREE.MeshPhongMaterial({ color: 0xFFEB3B, transparent: true, opacity: 0.5 });
+const matSupplyCrate= new THREE.MeshLambertMaterial({ color: 0x795548 });
+const matAmmoCache  = new THREE.MeshLambertMaterial({ color: 0x607D8B });
+const matThrowable  = new THREE.MeshLambertMaterial({ color: 0x9E9E9E });
+const matCover      = new THREE.MeshLambertMaterial({ color: 0x5D4037 });
+const matMarket     = new THREE.MeshLambertMaterial({ color: 0xFF9800 });
+const matStorage    = new THREE.MeshLambertMaterial({ color: 0x8D6E63 });
+const matTradeBoard = new THREE.MeshLambertMaterial({ color: 0xFFC107 });
+const matContract   = new THREE.MeshPhongMaterial({ color: 0x4FC3F7, emissive: 0x01579B });
+const matBlackMarket= new THREE.MeshPhongMaterial({ color: 0x9C27B0, emissive: 0x1A0025, shininess: 80 });
+const matSabotage   = new THREE.MeshPhongMaterial({ color: 0xFF5722, emissive: 0x3E1100 });
+const matDepot      = new THREE.MeshLambertMaterial({ color: 0x4CAF50 });
+
+function _addModeLabel(group, text, bgColor) {
+    const label = document.createElement('div');
+    label.className = 'name-label';
+    label.innerText = text;
+    label.style.backgroundColor = bgColor || 'rgba(0,0,0,0.8)';
+    label.style.fontSize = '10px';
+    label.style.padding = '2px 6px';
+    label.style.border = '1px solid rgba(255,255,255,0.3)';
+    document.getElementById('bubbles-layer').appendChild(label);
+    group.userData = group.userData || {};
+    group.userData.nameElement = label;
+    return label;
+}
+
+// ── Gincana ────────────────────────────────────────────
+function createCheckpoint(name) {
+    const group = new THREE.Group();
+    // Pillar
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3), matCheckpoint);
+    pillar.position.y = 1.5;
+    pillar.castShadow = true;
+    group.add(pillar);
+    // Flag on top
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.05), new THREE.MeshLambertMaterial({ color: 0xFFFFFF }));
+    flag.position.set(0.5, 3.0, 0);
+    group.add(flag);
+    // Ring at base
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.1, 8, 16), matCheckpoint);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.1;
+    group.add(ring);
+    _addModeLabel(group, `🏁 ${name || 'Checkpoint'}`, 'rgba(255,215,0,0.6)');
+    return group;
+}
+
+function createArtifact(name) {
+    const group = new THREE.Group();
+    // Floating gem
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.6), matArtifact);
+    gem.position.y = 1.5;
+    gem.castShadow = true;
+    group.add(gem);
+    // Glow ring
+    const glow = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.05, 8, 16), matArtifact);
+    glow.rotation.x = Math.PI / 2;
+    glow.position.y = 1.5;
+    group.add(glow);
+    _addModeLabel(group, `💎 ${name || 'Artefato'}`, 'rgba(224,64,251,0.6)');
+    return group;
+}
+
+function createDeliveryMarker(name) {
+    const group = new THREE.Group();
+    // Platform
+    const platform = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 6), matDelivery);
+    platform.position.y = 0.1;
+    group.add(platform);
+    // Arrow pointing down
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.0, 4), matDelivery);
+    arrow.position.y = 1.5;
+    arrow.rotation.z = Math.PI;
+    group.add(arrow);
+    _addModeLabel(group, `📍 ${name || 'Entrega'}`, 'rgba(0,230,118,0.6)');
+    return group;
+}
+
+// ── Warfare ────────────────────────────────────────────
+function createTeamBase(name, team) {
+    const group = new THREE.Group();
+    const mat = (team === 'alpha') ? matBaseAlpha : matBaseBeta;
+    // Fort walls
+    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.3), mat);
+    wall1.position.set(0, 1, 1.5);
+    group.add(wall1);
+    const wall2 = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.3), mat);
+    wall2.position.set(0, 1, -1.5);
+    group.add(wall2);
+    const wall3 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 3), mat);
+    wall3.position.set(1.5, 1, 0);
+    group.add(wall3);
+    const wall4 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 3), mat);
+    wall4.position.set(-1.5, 1, 0);
+    group.add(wall4);
+    // Flag
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.5), matWood);
+    pole.position.y = 1.75;
+    group.add(pole);
+    const teamFlag = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.05), mat);
+    teamFlag.position.set(0.4, 3.2, 0);
+    group.add(teamFlag);
+    [wall1, wall2, wall3, wall4].forEach(w => { w.castShadow = true; w.receiveShadow = true; });
+    const icon = team === 'alpha' ? '🔵' : '🔴';
+    _addModeLabel(group, `${icon} ${name || 'Base'}`, team === 'alpha' ? 'rgba(33,150,243,0.6)' : 'rgba(244,67,54,0.6)');
+    return group;
+}
+
+function createControlZone(name) {
+    const group = new THREE.Group();
+    // Glowing platform
+    const platform = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.15, 16), matControlZone);
+    platform.position.y = 0.08;
+    group.add(platform);
+    // Center marker
+    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.5, 4), matCheckpoint);
+    marker.position.y = 0.8;
+    group.add(marker);
+    _addModeLabel(group, `⚔️ ${name || 'Zona'}`, 'rgba(255,235,59,0.6)');
+    return group;
+}
+
+function createSupplyCrate(name) {
+    const group = new THREE.Group();
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 1.0), matSupplyCrate);
+    crate.position.y = 0.4;
+    crate.castShadow = true;
+    group.add(crate);
+    // Cross mark
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 0.1), new THREE.MeshLambertMaterial({ color: 0xF44336 }));
+    cross.position.set(0, 0.81, 0.51);
+    group.add(cross);
+    const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), new THREE.MeshLambertMaterial({ color: 0xF44336 }));
+    cross2.position.set(0, 0.81, 0.51);
+    group.add(cross2);
+    _addModeLabel(group, `📦 ${name || 'Suprimentos'}`, 'rgba(121,85,72,0.6)');
+    return group;
+}
+
+function createAmmoCache(name) {
+    const group = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.5), matAmmoCache);
+    box.position.y = 0.25;
+    box.castShadow = true;
+    group.add(box);
+    _addModeLabel(group, `🔫 ${name || 'Munição'}`, 'rgba(96,125,139,0.6)');
+    return group;
+}
+
+function createThrowableStone() {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), matThrowable);
+    mesh.position.y = 0.3;
+    mesh.castShadow = true;
+    return mesh;
+}
+
+function createCover(name) {
+    const group = new THREE.Group();
+    // Sandbag wall
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 0.5), matCover);
+    wall.position.y = 0.4;
+    wall.castShadow = true;
+    group.add(wall);
+    _addModeLabel(group, `🛡️ ${name || 'Abrigo'}`, 'rgba(93,64,55,0.6)');
+    return group;
+}
+
+// ── Economy ────────────────────────────────────────────
+function createMarketPost(name) {
+    const group = new THREE.Group();
+    // Stall structure
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), matMarket);
+    counter.position.y = 0.5;
+    counter.castShadow = true;
+    group.add(counter);
+    // Canopy
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 1.5), new THREE.MeshLambertMaterial({ color: 0xE65100 }));
+    canopy.position.y = 2.0;
+    group.add(canopy);
+    // Poles
+    for (const dx of [-1, 1]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2), matWood);
+        pole.position.set(dx * 1.1, 1, 0.7);
+        group.add(pole);
+    }
+    _addModeLabel(group, `🏪 ${name || 'Mercado'}`, 'rgba(255,152,0,0.6)');
+    return group;
+}
+
+function createStorageBox(name) {
+    const group = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 1.2), matStorage);
+    box.position.y = 0.5;
+    box.castShadow = true;
+    group.add(box);
+    // Lid
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 1.3), matWood);
+    lid.position.y = 1.05;
+    group.add(lid);
+    _addModeLabel(group, `📦 ${name || 'Armazém'}`, 'rgba(141,110,99,0.6)');
+    return group;
+}
+
+function createTradeBoard(name) {
+    const group = new THREE.Group();
+    // Sign post
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.5), matWood);
+    pole.position.y = 1.25;
+    group.add(pole);
+    // Board
+    const board = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 0.1), matTradeBoard);
+    board.position.y = 2.0;
+    board.castShadow = true;
+    group.add(board);
+    _addModeLabel(group, `📋 ${name || 'Ordens'}`, 'rgba(255,193,7,0.6)');
+    return group;
+}
+
+function createContractItem(name) {
+    const group = new THREE.Group();
+    // Scroll
+    const scroll = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.8, 8), matContract);
+    scroll.position.y = 0.5;
+    scroll.rotation.z = Math.PI / 6;
+    scroll.castShadow = true;
+    group.add(scroll);
+    _addModeLabel(group, `📜 ${name || 'Contrato'}`, 'rgba(79,195,247,0.6)');
+    return group;
+}
+
+// ── Hybrid/GangWar ─────────────────────────────────────
+function createBlackMarket(name) {
+    const group = new THREE.Group();
+    // Dark tent
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.5, 6), matBlackMarket);
+    tent.position.y = 1.25;
+    tent.castShadow = true;
+    group.add(tent);
+    // Crates around
+    for (let i = 0; i < 3; i++) {
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), matAmmoCache);
+        crate.position.set(Math.cos(i*2.1)*1.2, 0.2, Math.sin(i*2.1)*1.2);
+        group.add(crate);
+    }
+    _addModeLabel(group, `🏴 ${name || 'Mercado Negro'}`, 'rgba(156,39,176,0.6)');
+    return group;
+}
+
+function createSabotageTarget(name) {
+    const group = new THREE.Group();
+    // Target structure
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2.5, 6), matSabotage);
+    tower.position.y = 1.25;
+    tower.castShadow = true;
+    group.add(tower);
+    // Warning sign
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.05), new THREE.MeshLambertMaterial({ color: 0xFFEB3B }));
+    sign.position.set(0, 2.7, 0);
+    group.add(sign);
+    _addModeLabel(group, `💣 ${name || 'Alvo'}`, 'rgba(255,87,34,0.6)');
+    return group;
+}
+
+function createTeamDepot(name, team) {
+    const group = new THREE.Group();
+    const mat = (team === 'alpha') ? matBaseAlpha : matBaseBeta;
+    // Depot box
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1.5), mat);
+    box.position.y = 0.6;
+    box.castShadow = true;
+    group.add(box);
+    // Lock
+    const lock = new THREE.Mesh(new THREE.SphereGeometry(0.2), matGold);
+    lock.position.set(0, 1.2, 0.76);
+    group.add(lock);
+    const icon = team === 'alpha' ? '🔵' : '🔴';
+    _addModeLabel(group, `${icon} ${name || 'Depósito'}`, team === 'alpha' ? 'rgba(33,150,243,0.5)' : 'rgba(244,67,54,0.5)');
+    return group;
+}
+
 function createTrophy() {
     const group = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), matStone);
@@ -1014,6 +1305,26 @@ function updateWorld(data) {
                 mesh = createHouse(entity.name, houseColor, rotation);
             }
             else if (entity.type === "cemetery") mesh = createCemeteryArea();
+            // ── Gincana (F12) ──
+            else if (entity.type === "checkpoint") mesh = createCheckpoint(entity.name);
+            else if (entity.type === "artifact") mesh = createArtifact(entity.name);
+            else if (entity.type === "delivery_marker") mesh = createDeliveryMarker(entity.name);
+            // ── Warfare (F13–F16) ──
+            else if (entity.type === "team_base") mesh = createTeamBase(entity.name, entity.team);
+            else if (entity.type === "control_zone") mesh = createControlZone(entity.name);
+            else if (entity.type === "supply_crate") mesh = createSupplyCrate(entity.name);
+            else if (entity.type === "ammo_cache") mesh = createAmmoCache(entity.name);
+            else if (entity.type === "throwable_stone") mesh = createThrowableStone();
+            else if (entity.type === "cover") mesh = createCover(entity.name);
+            // ── Economy (F17–F19) ──
+            else if (entity.type === "market_post") mesh = createMarketPost(entity.name);
+            else if (entity.type === "storage_box") mesh = createStorageBox(entity.name);
+            else if (entity.type === "trade_order") mesh = createTradeBoard(entity.name);
+            else if (entity.type === "contract_item") mesh = createContractItem(entity.name);
+            // ── Hybrid/GangWar (F20) ──
+            else if (entity.type === "black_market") mesh = createBlackMarket(entity.name);
+            else if (entity.type === "sabotage_target") mesh = createSabotageTarget(entity.name);
+            else if (entity.type === "team_inventory_depot") mesh = createTeamDepot(entity.name, entity.team);
             
             if (mesh) {
                 mesh.position.set(pos.x, 0, pos.z);
