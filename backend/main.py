@@ -388,6 +388,7 @@ def read_root():
         "started": world.started,
         "session_id": _current_session_id,
         "agents": len(world.agents),
+        "game_mode": world.game_mode,
     }
 
 @app.post("/reset", dependencies=[Depends(verify_admin_token)])
