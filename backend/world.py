@@ -970,7 +970,10 @@ class World:
                     # Only trigger if not remote AND not already thinking AND not walking AND not just arrived
                     is_walking = getattr(agent, 'target_x', None) is not None
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
+                    reason_block = f"remote:{getattr(agent, 'is_remote', False)} thinking:{agent.id in self.thinking_agents} walking:{is_walking} arrived:{just_arrived}"
+                    logger.info(f"Eval {agent.name}: {reason_block}")
                     if not getattr(agent, 'is_remote', False) and agent.id not in self.thinking_agents and not is_walking and not just_arrived:
+                        logger.info(f"==> DISPATCHING AI TASK para {agent.name}")
                         context = self._get_context_for_agent(agent)
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
 
