@@ -304,13 +304,23 @@ class SessionStore:
     def get_leaderboard_elo(self, season_id: str) -> list[dict]:
         """Retorna o leaderboard de ELO atual para uma temporada."""
         cur = self.conn.execute(
-            """SELECT profile_id, elo_after as elo, placement, score_total, recorded_at
-               FROM elo_history
-               WHERE season_id=?
-               GROUP BY profile_id
-               HAVING MAX(id)
+            """SELECT eh.profile_id,
+                      eh.elo_after AS elo,
+                      eh.placement,
+                      eh.score_total,
+                      eh.recorded_at
+               FROM elo_history AS eh
+               JOIN (
+                   SELECT profile_id, MAX(id) AS max_id
+                   FROM elo_history
+                   WHERE season_id=?
+                   GROUP BY profile_id
+               ) AS latest
+                 ON eh.profile_id = latest.profile_id
+                AND eh.id = latest.max_id
+               WHERE eh.season_id=?
                ORDER BY elo DESC""",
-            (season_id,),
+            (season_id, season_id),
         )
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
